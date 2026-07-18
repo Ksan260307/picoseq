@@ -11,16 +11,26 @@ Place notes on a grid to build a song — or start from a photo or your own humm
 - Four layered parts (melody / bass / rhythm / sub)
 - **🎹 Sound sets** — "Pico 8-bit", "Mellow 16-bit", and "Sparkle 32-bit".
   Switching also re-skins the whole interface to match
+- **🎼 65 moods** — major / minor / all church modes / modes of the melodic & harmonic minor /
+  Japanese scales (in-sen, ryukyu, …) / blues, jazz, whole-tone, diminished / world scales
+  (Persian, Arabic, Hungarian, …) and more (plus photo-derived scales)
 - **✨ Auto-compose** — one-click composition. Keep the "seed value" to recreate the exact same tune anytime.
-  6 bass × 5 backing × 6 drum × 4 melody-rhythm × 3 development styles combine into
-  4000+ base patterns, so every seed sounds different
+  Chord progressions (100–480 per mood, **~27,000 total**) × 6 bass × 5 backing × 6 drum × 4 melody-rhythm ×
+  3 development styles combine, so every seed sounds different. Progressions are generated from
+  functional harmony (tonic / subdominant / dominant); the one used (e.g. Am→F→C→G) is shown after generating
+- **🎲 Surprise me** — randomizes mood, sound set, and seed for a one-click reveal, so you stumble
+  onto unexpected combinations from all 65 moods
 - **🎼 Auto-song** — generates a whole intro → A → B → outro song structure in one click
 - **🎤 From humming** — sing into the microphone and PicoSeq turns your pitch into a melody
   (YIN-style pitch detection that resists octave errors even on harmonic-rich voices)
 - **🎸 Auto-accompany** — draw only a melody and matching bass, drums, and backing are generated
 - **📷 From a photo** — up to 8 rectangles found in a photo become a set of "allowed notes",
   added to the mood selector as a *Photo Scale* — compose using only those notes for inspiration
+- **Editing tools** — octave transpose (🔼🔽 / Ctrl+↑↓), reverse the phrase in time (🔄),
+  and clear a single part (right-click its part button)
 - **Live updates** — add, remove, and stretch notes (or change the tempo) while the song keeps playing
+- **🎧 WAV / 🎹 MIDI export** — save an audio file, or a standard MIDI file you can open in a DAW or
+  notation software (parts split across MIDI channels)
 - Audio is synthesized with integer math only, so the same project produces a bit-identical WAV on any machine
 - Runs on the Python standard library alone — nothing to install
 
@@ -151,6 +161,7 @@ picoseq/
 │   │   ├── synth.py       fixed-point synth (pulse/triangle/noise/saw)
 │   │   ├── renderer.py    mixer (voice cache, optional numpy fast path)
 │   │   ├── wavio.py       WAV encoding
+│   │   ├── midiio.py      standard MIDI file export
 │   │   ├── serialize.py   versioned JSON save files + legacy migration
 │   │   └── history.py     undo / redo
 │   ├── vision/            photo scale (image analysis)

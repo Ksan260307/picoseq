@@ -22,6 +22,7 @@ from .constants import (
     SEED_MAX,
     SEED_MIN,
     SOUND_SETS,
+    WAVE_NOISE,
     clamp,
 )
 from .music import PHOTO_SCALE, SCALES, get_scale
@@ -193,6 +194,60 @@ def clear_phrase(project: Project) -> Project:
     if project.phrase == phrase_ops.EMPTY_PHRASE:
         return project
     return update(project, phrase=phrase_ops.EMPTY_PHRASE)
+
+
+def clear_part(project: Project, wave: int) -> Project:
+    """指定パートの音符だけを消す (他パートは残す)。"""
+    _check_part(wave)
+    kept = [note for _, note in phrase_ops.active_notes(project.phrase)
+            if note.wave != wave]
+    buffer = phrase_ops.build_phrase(kept)
+    if buffer == project.phrase:
+        return project
+    return update(project, phrase=buffer)
+
+
+def transpose(project: Project, semitones: int) -> Project:
+    """メロディ系パートを半音単位で移調する。音域を外れる音は落とす。
+
+    リズム (ノイズ) は音程を持たないので動かさない。
+    """
+    from .note import Note
+    changed = False
+    notes = []
+    for _, note in phrase_ops.active_notes(project.phrase):
+        if note.wave == WAVE_NOISE:
+            notes.append(note)
+            continue
+        pitch = note.pitch + semitones
+        if PITCH_MIN <= pitch <= PITCH_MAX:
+            notes.append(Note(pitch, note.step, note.wave, note.dur))
+            if semitones:
+                changed = True
+        else:
+            changed = True  # 範囲外は消える
+    if not changed:
+        return project
+    return update(project, phrase=phrase_ops.build_phrase(notes))
+
+
+def reverse_phrase(project: Project) -> Project:
+    """フレーズを時間方向に反転する (逆行)。各パートを丸ごとひっくり返す。"""
+    from .note import Note
+    steps = steps_of(project)
+    notes = []
+    for _, note in phrase_ops.active_notes(project.phrase):
+        if note.step >= steps:
+            continue
+        start = steps - (note.step + note.dur)
+        if start < 0:
+            start = 0
+        dur = min(note.dur, steps - start)
+        notes.append(Note(note.pitch, start, note.wave, dur))
+    buffer = phrase_ops.build_phrase(notes)
+    if buffer == project.phrase:
+        return project
+    return update(project, phrase=buffer)
 
 
 def generate_phrase(project: Project) -> Project:

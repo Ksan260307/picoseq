@@ -25,6 +25,18 @@ class TestUiModules(unittest.TestCase):
         self.assertEqual(dim("#ffffff", 50), "#7f7f7f")
         self.assertEqual(dim("#000000", 50), "#000000")
 
+    def test_palette_switch_changes_module_globals(self):
+        """音色ごとにパレット (BG など) が入れ替わる。"""
+        from picoseq.ui import theme
+        try:
+            theme.set_palette("warm16")
+            warm_bg = theme.BG
+            theme.set_palette("clear32")
+            self.assertNotEqual(theme.BG, warm_bg)
+        finally:
+            theme.set_palette("retro8")
+        self.assertEqual(theme.BG, theme.PALETTES["retro8"]["BG"])
+
 
 class TestUiSelftest(unittest.TestCase):
     def test_selftest_passes(self):

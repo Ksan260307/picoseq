@@ -7,11 +7,13 @@ from picoseq.core.music import (
     KEY_NAMES,
     PITCH_MILLIHZ,
     SCALE_IDS,
+    SCALE_PROGRESSIONS,
     SCALES,
     chord_at,
     in_scale,
     note_name,
     pitch_millihz,
+    progression_choices,
     root_note,
     scale_pitches,
 )
@@ -31,13 +33,30 @@ class TestNames(unittest.TestCase):
 
 
 class TestScales(unittest.TestCase):
-    def test_four_scales(self):
-        self.assertEqual(set(SCALE_IDS), {"major", "minor", "japanese", "battle"})
+    def test_many_scales(self):
+        # 従来の主要曲調を含み、非常に多くの曲調がある
+        self.assertGreaterEqual(len(SCALE_IDS), 60)
+        for base in ("major", "minor", "japanese", "battle"):
+            self.assertIn(base, SCALE_IDS)
+
+    def test_intervals_are_unique(self):
+        """曲調ごとに音の並びが異なる (重複した曲調が無い)。"""
+        sets = [tuple(SCALES[s]["intervals"]) for s in SCALE_IDS]
+        self.assertEqual(len(set(sets)), len(sets))
+
+    def test_labels_present_and_unique(self):
+        """各曲調に日本語ラベルがあり、重複しない。"""
+        labels = [SCALES[s]["label"] for s in SCALE_IDS]
+        for label in labels:
+            self.assertTrue(label.strip())
+        self.assertEqual(len(set(labels)), len(labels))
 
     def test_intervals_valid(self):
         for scale_id in SCALE_IDS:
             intervals = SCALES[scale_id]["intervals"]
             self.assertEqual(intervals[0], 0)
+            self.assertGreaterEqual(len(intervals), 5)
+            self.assertEqual(len(set(intervals)), len(intervals))  # 重複なし
             for iv in intervals:
                 self.assertTrue(0 <= iv < 12)
             self.assertEqual(list(intervals), sorted(intervals))
@@ -47,6 +66,96 @@ class TestScales(unittest.TestCase):
             n = len(SCALES[scale_id]["intervals"])
             for degree in SCALES[scale_id]["progression"]:
                 self.assertTrue(0 <= degree < n)
+
+
+class TestProgressionLibrary(unittest.TestCase):
+    def test_each_scale_has_a_large_library(self):
+        """各曲調に十分多くの進行がある。"""
+        for scale_id in SCALE_IDS:
+            with self.subTest(scale=scale_id):
+                self.assertGreaterEqual(len(SCALE_PROGRESSIONS[scale_id]), 100)
+
+    def test_total_is_very_large(self):
+        total = sum(len(p) for p in SCALE_PROGRESSIONS.values())
+        self.assertGreaterEqual(total, 10000)  # 全曲調あわせて 1 万通り超
+
+    def test_all_degrees_in_range(self):
+        for scale_id, progs in SCALE_PROGRESSIONS.items():
+            n = len(SCALES[scale_id]["intervals"])
+            for prog in progs:
+                with self.subTest(scale=scale_id, prog=prog):
+                    self.assertEqual(len(prog), 4)
+                    for degree in prog:
+                        self.assertTrue(0 <= degree < n)
+
+    def test_most_have_a_tonic_function_chord(self):
+        """多くの進行にトニック機能の和音が含まれ、調が定まる。
+
+        IV–V–IV–V のような循環進行 (トニックを含まない) も混ざるが、
+        大半はトニックで支えられているのが望ましい。
+        """
+        from picoseq.core.music import _function_groups
+        for scale_id, progs in SCALE_PROGRESSIONS.items():
+            n = len(SCALES[scale_id]["intervals"])
+            tonic = set(_function_groups(n)[0])
+            grounded = sum(1 for prog in progs if tonic & set(prog))
+            with self.subTest(scale=scale_id):
+                self.assertGreater(grounded, len(progs) // 2)
+
+    def test_no_duplicate_progressions(self):
+        for scale_id, progs in SCALE_PROGRESSIONS.items():
+            with self.subTest(scale=scale_id):
+                self.assertEqual(len(progs), len(set(progs)))
+
+    def test_default_progression_is_included(self):
+        """従来の既定進行が候補に含まれている (互換性)。"""
+        for scale_id in SCALE_IDS:
+            self.assertIn(SCALES[scale_id]["progression"],
+                          SCALE_PROGRESSIONS[scale_id])
+
+    def test_choices_dispatch(self):
+        self.assertEqual(progression_choices("minor"), SCALE_PROGRESSIONS["minor"])
+
+    def test_photo_choices_valid_for_note_count(self):
+        for n in range(3, 13):
+            custom = tuple(range(n))
+            choices = progression_choices("photo", custom)
+            self.assertTrue(choices)
+            for prog in choices:
+                for degree in prog:
+                    self.assertTrue(0 <= degree < n)
+
+    def test_generator_is_deterministic(self):
+        from picoseq.core.music import _generate_progressions
+        self.assertEqual(_generate_progressions(7), _generate_progressions(7))
+
+    def test_generator_grows_with_note_count(self):
+        from picoseq.core.music import _generate_progressions
+        counts = [len(set(_generate_progressions(n))) for n in (5, 6, 7)]
+        self.assertTrue(counts[0] < counts[2])  # 音数が多いほど組み合わせが増える
+
+
+class TestChordNames(unittest.TestCase):
+    def test_qualities(self):
+        from picoseq.core.music import chord_name
+        self.assertEqual(chord_name(chord_at(0, "major", 0, 4, (0,))), "C")
+        self.assertEqual(chord_name(chord_at(0, "major", 0, 4, (5,))), "Am")
+        self.assertEqual(chord_name(chord_at(0, "major", 0, 4, (6,))), "Bdim")
+        self.assertEqual(chord_name(chord_at(0, "minor", 0, 4, (0,))), "Cm")
+
+    def test_progression_names(self):
+        from picoseq.core.music import progression_names
+        # A マイナー (key=9) の i–VI–III–VII は Am–F–C–G
+        self.assertEqual(progression_names(9, "minor", (0, 5, 2, 6)),
+                         ["Am", "F", "C", "G"])
+
+    def test_progression_names_length(self):
+        from picoseq.core.music import progression_names
+        for scale_id in SCALE_IDS:
+            for prog in SCALE_PROGRESSIONS[scale_id]:
+                names = progression_names(0, scale_id, prog)
+                self.assertEqual(len(names), 4)
+                self.assertTrue(all(names))
 
 
 class TestPhotoScale(unittest.TestCase):

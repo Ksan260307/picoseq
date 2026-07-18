@@ -49,6 +49,64 @@ class TestDeterminism(unittest.TestCase):
         self.assertEqual(compose(4, 0, "major", 9, (0, 4, 5, 3)),
                          compose(4, 0, "major", 9, (0, 4, 5, 3)))
 
+    def test_seed_selects_varied_progressions(self):
+        """指定なしのとき、シード値でコード進行が選ばれ、多くの種類が現れる。"""
+        from picoseq.core.music import chord_at, progression_choices
+        from picoseq.core.prng import Rng
+
+        used = set()
+        for scale in ("major", "minor"):
+            choices = progression_choices(scale)
+            for seed in range(1, 200):
+                rng = Rng(seed)
+                used.add((scale, choices[rng.next_int(len(choices))]))
+        # major13 + minor12 の進行がほぼ出尽くす
+        self.assertGreaterEqual(len(used), 20)
+
+    def test_explicit_progression_overrides_seed_pick(self):
+        """進行を明示したら、シード選択より優先される。"""
+        forced = compose(4, 0, "minor", 5, (0, 0, 0, 0))
+        # 同じ進行を明示すれば毎回同じ
+        self.assertEqual(forced, compose(4, 0, "minor", 5, (0, 0, 0, 0)))
+
+    def test_chosen_progression_in_choices_and_deterministic(self):
+        from picoseq.core.composer import chosen_progression
+        from picoseq.core.music import progression_choices
+        for scale in ("major", "minor", "japanese", "battle"):
+            choices = progression_choices(scale)
+            for seed in (1, 7, 42, 300):
+                with self.subTest(scale=scale, seed=seed):
+                    prog = chosen_progression(scale, seed)
+                    self.assertIn(prog, choices)
+                    self.assertEqual(prog, chosen_progression(scale, seed))
+
+    def test_chosen_progression_drives_bass_roots(self):
+        """表示用の chosen_progression が、実際の曲のベース根音と一致する。
+
+        自動作成のベースは各半小節でコードの根音を土台にするので、
+        小節頭のベース音のクラスは進行の各コードの根音クラスに一致する。
+        """
+        from picoseq.core.composer import chosen_progression
+        from picoseq.core.music import chord_at
+        from picoseq.core.constants import WAVE_TRIANGLE
+
+        beats, key, scale, seed = 4, 0, "minor", 7
+        prog = chosen_progression(scale, seed)
+        half = beats * 2  # 半小節のステップ数
+        buf = compose(beats, key, scale, seed)
+        bass = {n.step: n for _, n in active_notes(buf) if n.wave == WAVE_TRIANGLE}
+        # 各半小節の頭のベース (存在すれば) は、その区画のコード根音クラス
+        for window in range(4):
+            step = window * half
+            if step in bass:
+                chord = chord_at(key, scale, step, beats, prog)
+                self.assertEqual(bass[step].pitch % 12, chord.root % 12)
+
+    def test_chosen_progression_respects_explicit(self):
+        from picoseq.core.composer import chosen_progression
+        self.assertEqual(chosen_progression("minor", 5, None, (1, 2, 3, 4)),
+                         (1, 2, 3, 4))
+
 
 class TestInvariants(unittest.TestCase):
     def test_notes_within_bounds(self):

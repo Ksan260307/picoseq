@@ -174,6 +174,61 @@ class TestPhraseEdit(unittest.TestCase):
         self.assertIs(actions.clear_phrase(self.p), self.p)
 
 
+class TestEditTools(unittest.TestCase):
+    def _project(self, notes):
+        return actions.update(new_project(), phrase=build_phrase(notes))
+
+    def test_transpose_shifts_pitched_parts(self):
+        p = self._project([Note(60, 0, 0, 1), Note(48, 4, 1, 1)])
+        up = actions.transpose(p, 12)
+        pitches = sorted(n.pitch for _, n in active_notes(up.phrase))
+        self.assertEqual(pitches, [60, 72])
+
+    def test_transpose_keeps_drums_fixed(self):
+        p = self._project([Note(60, 0, 2, 1)])  # noise
+        up = actions.transpose(p, 12)
+        self.assertEqual([n.pitch for _, n in active_notes(up.phrase)], [60])
+
+    def test_transpose_drops_out_of_range(self):
+        p = self._project([Note(84, 0, 0, 1)])  # C6 上限
+        self.assertEqual(count_notes(actions.transpose(p, 12).phrase), 0)
+        p = self._project([Note(36, 0, 0, 1)])  # C2 下限
+        self.assertEqual(count_notes(actions.transpose(p, -12).phrase), 0)
+
+    def test_transpose_zero_is_noop(self):
+        p = self._project([Note(60, 0, 0, 1)])
+        self.assertIs(actions.transpose(p, 0), p)
+
+    def test_clear_part(self):
+        p = self._project([Note(60, 0, 0, 1), Note(48, 0, 1, 1), Note(60, 2, 2, 1)])
+        cleared = actions.clear_part(p, 2)
+        waves = {n.wave for _, n in active_notes(cleared.phrase)}
+        self.assertEqual(waves, {0, 1})
+
+    def test_clear_part_absent_is_noop(self):
+        p = self._project([Note(60, 0, 0, 1)])
+        self.assertIs(actions.clear_part(p, 3), p)
+
+    def test_clear_part_validates(self):
+        with self.assertRaises(ValueError):
+            actions.clear_part(new_project(), 4)
+
+    def test_reverse_mirrors_time(self):
+        p = self._project([Note(60, 0, 0, 4), Note(64, 28, 0, 4)])  # 32 steps
+        rev = actions.reverse_phrase(p)
+        placed = sorted((n.step, n.pitch) for _, n in active_notes(rev.phrase))
+        self.assertEqual(placed, [(0, 64), (28, 60)])
+
+    def test_reverse_twice_restores(self):
+        p = actions.generate_phrase(actions.set_seed(new_project(), 5))
+        self.assertEqual(actions.reverse_phrase(actions.reverse_phrase(p)).phrase,
+                         p.phrase)
+
+    def test_reverse_empty_is_noop(self):
+        p = new_project()
+        self.assertIs(actions.reverse_phrase(p), p)
+
+
 class TestGenerate(unittest.TestCase):
     def test_deterministic(self):
         p = actions.set_seed(new_project(), 77)

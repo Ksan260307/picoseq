@@ -27,6 +27,7 @@ from ..core.music import KEY_NAMES, SCALE_IDS, SCALES, note_name
 from ..core.note import unpack_note
 from ..core.phrase import count_notes, find_note_at
 from ..core.project import new_project, steps_of
+from ..core.midiio import phrase_midi, song_midi
 from ..core.renderer import (
     render_phrase,
     render_phrase_loop,
@@ -74,9 +75,12 @@ class PicoSeqApp:
         self._gesture = None
         self._drag_ctx = None
         self._syncing = False
+        self._dirty = False          # 未保存の変更があるか
+        self.theme_sound = self.project.sound  # 画面に適用中の音色パレット
         self.autosave_file = storage.autosave_path()
         self.saved_snapshot = dumps(self.project)
 
+        theme.set_palette(self.project.sound)
         root.configure(bg=theme.BG)
         root.title(TITLE)
         self._build_ui()
@@ -129,7 +133,9 @@ class PicoSeqApp:
             return
         self.history, snapshot = result
         self.project = loads(snapshot)
-        self.refresh_all()
+        if not self._ensure_theme():  # 音色をまたぐ場合は画面ごと作り直す
+            self.refresh_all()
+        self._update_title()
         self.set_status("元に戻しました。")
 
     def redo_action(self, _event=None):
@@ -139,14 +145,29 @@ class PicoSeqApp:
             return
         self.history, snapshot = result
         self.project = loads(snapshot)
-        self.refresh_all()
+        if not self._ensure_theme():
+            self.refresh_all()
+        self._update_title()
         self.set_status("やり直しました。")
 
     def _mark_edit(self):
         """状態が変わったとき呼ばれる。演奏中なら再生へリアルタイム反映する。"""
+        self._set_dirty(True)
         if self.play_mode:
             self.play_hint_var.set("♻ リアルタイム反映")
             self._schedule_live_rerender()
+
+    def _set_dirty(self, dirty: bool):
+        """未保存フラグを更新し、変化したときだけタイトルに ● を出す。"""
+        if dirty == self._dirty:
+            return
+        self._dirty = dirty
+        if not self.silent:
+            self.root.title(("● 未保存  " if dirty else "") + TITLE)
+
+    def _update_title(self):
+        """保存済みの内容と比べて未保存表示を正確に合わせる (読込・元に戻す後)。"""
+        self._set_dirty(dumps(self.project) != self.saved_snapshot)
 
     # ==============================
     # 画面の組み立て
@@ -212,7 +233,7 @@ class PicoSeqApp:
 
         self.beats_box = self._combo(bar1, "拍子", [f"{n}/4" for n in range(2, 8)], self._on_beats_change, width=5)
         self.key_box = self._combo(bar1, "キー", list(KEY_NAMES), self._on_key_change, width=8)
-        self.scale_box = self._combo(bar1, "曲調", self._scale_labels(), self._on_scale_change, width=16)
+        self.scale_box = self._combo(bar1, "曲調", self._scale_labels(), self._on_scale_change, width=18)
 
         tk.Label(bar1, text="シード値", font=theme.FONT_SMALL,
                  bg=theme.PANEL, fg=theme.TEXT_DIM).pack(side="left", padx=(12, 2))
@@ -227,6 +248,7 @@ class PicoSeqApp:
         self.seed_spin.bind("<Return>", lambda e: self.generate_from_seed_entry())
 
         self._button(bar1, "✨ 自動作成", self.generate_auto).pack(side="left", padx=(8, 2))
+        self._button(bar1, "🎲 サプライズ", self.generate_surprise).pack(side="left", padx=2)
         self._button(bar1, "🎤 鼻歌から", self.hum_compose).pack(side="left", padx=2)
         self._button(bar1, "📷 写真から", self.photo_compose).pack(side="left", padx=2)
         self.arrange_btn = self._button(bar1, "🎸 伴奏づけ", self.arrange_accompaniment)
@@ -243,6 +265,7 @@ class PicoSeqApp:
                 command=lambda i=i: self.select_part(i), relief="flat", bd=1,
                 padx=8, pady=2, takefocus=0, cursor="hand2",
             )
+            btn.bind("<Button-3>", lambda e, i=i: self.clear_part_action(i))  # 右クリックで消去
             btn.pack(side="left", padx=2)
             self.part_buttons.append(btn)
 
@@ -270,9 +293,14 @@ class PicoSeqApp:
         self.gate_scale.pack(side="left", padx=2)
         self._attach_gesture(self.gate_scale)
 
+        self._button(bar2, "🔼", self.transpose_up).pack(side="left", padx=(8, 1))
+        self._button(bar2, "🔽", self.transpose_down).pack(side="left", padx=1)
+        self._button(bar2, "🔄 反転", self.reverse_phrase_action).pack(side="left", padx=(6, 2))
+
         self._button(bar2, "★ 登録", self.save_current_pattern).pack(side="right", padx=2)
         self._button(bar2, "🗑 クリア", self.clear_phrase, danger=True).pack(side="right", padx=2)
-        self._button(bar2, "🎧 WAV書出", lambda: self.do_export_wav("phrase")).pack(side="right", padx=(2, 8))
+        self._button(bar2, "🎹 MIDI", lambda: self.do_export_midi("phrase")).pack(side="right", padx=2)
+        self._button(bar2, "🎧 WAV", lambda: self.do_export_wav("phrase")).pack(side="right", padx=(2, 8))
 
         self.roll = RollView(self.phrase_frame, self)
         self.roll.frame.pack()
@@ -289,6 +317,7 @@ class PicoSeqApp:
         self._button(bar3, "✨ ソング自動作成", self.generate_song_auto).pack(side="left", padx=2)
         self._button(bar3, "🗑 構成クリア", self.clear_song, danger=True).pack(side="left", padx=(12, 2))
         self._button(bar3, "🎵 WAV書出", lambda: self.do_export_wav("song")).pack(side="left", padx=(12, 2))
+        self._button(bar3, "🎹 MIDI書出", lambda: self.do_export_midi("song")).pack(side="left", padx=2)
 
         palette = tk.Frame(self.song_frame, bg=theme.PANEL)
         palette.pack(fill="x", pady=(0, 6))
@@ -360,6 +389,8 @@ class PicoSeqApp:
         root.bind_all("<Control-y>", self.redo_action)
         root.bind_all("<Control-Tab>", self._on_tab_key)
         root.bind_all("<F1>", self.show_help)
+        root.bind_all("<Control-Up>", self.transpose_up)
+        root.bind_all("<Control-Down>", self.transpose_down)
         for i in range(4):
             root.bind_all(str(i + 1), lambda e, i=i: self._on_digit(e, i))
 
@@ -570,6 +601,44 @@ class PicoSeqApp:
             self.commit(actions.clear_phrase(self.project))
             self.set_status("フレーズを消しました (↩ で戻せます)。")
 
+    def clear_part_action(self, wave):
+        """指定パートの音符だけを消す (パートボタンの右クリック)。"""
+        from ..core.phrase import active_notes
+        if not any(n.wave == wave for _, n in active_notes(self.project.phrase)):
+            self.set_status(f"「{theme.PART_NAMES[wave]}」には音がありません。")
+            return
+        self.commit(actions.clear_part(self.project, wave))
+        self.set_status(f"「{theme.PART_NAMES[wave]}」パートを消しました (↩ で戻せます)。")
+
+    def transpose_up(self, _event=None):
+        self._transpose(12)
+
+    def transpose_down(self, _event=None):
+        self._transpose(-12)
+
+    def _transpose(self, semitones):
+        new_project = actions.transpose(self.project, semitones)
+        if new_project is self.project:
+            self.set_status("移調できませんでした (これ以上は音域の外です)。")
+            return
+        self.commit(new_project)
+        self.set_status("1 オクターブ上げました。" if semitones > 0 else "1 オクターブ下げました。")
+
+    def reverse_phrase_action(self):
+        if count_notes(self.project.phrase) == 0:
+            self.set_status("反転する音がありません。")
+            return
+        self.commit(actions.reverse_phrase(self.project))
+        self.set_status("フレーズを時間反転しました (もう一度押すと戻ります)。")
+
+    def _progression_text(self) -> str:
+        """今のフレーズで使われているコード進行を音名で返す (例: Am→F→C→G)。"""
+        from picoseq.core.composer import chosen_progression
+        from picoseq.core.music import progression_names
+        p = self.project
+        progression = chosen_progression(p.scale, p.seed, p.custom_scale, p.progression)
+        return "→".join(progression_names(p.key, p.scale, progression, p.custom_scale))
+
     def generate_auto(self):
         """自動作成 — 毎回新しい「シード値」を選んで作る。番号は記録され再現できる。"""
         seed = random.randint(SEED_MIN, SEED_MAX)  # 番号選びだけ乱数。結果は project に記録される
@@ -580,14 +649,35 @@ class PicoSeqApp:
             self.seed_var.set(str(seed))
         finally:
             self._syncing = False
-        self.set_status(f"シード値 {seed} で作成しました。気に入ったら ★ 登録! "
-                        "(番号を入力して Enter で同じ曲を再現できます)")
+        self.set_status(f"シード値 {seed} で作成 (コード進行 {self._progression_text()})。"
+                        "気に入ったら ★ 登録!")
 
     def generate_from_seed_entry(self):
         """シード値の欄で Enter — その番号の曲を再現する。"""
         self._on_seed_change()
         self.commit(actions.generate_phrase(self.project))
-        self.set_status(f"シード値 {self.project.seed} の曲を再現しました。")
+        self.set_status(f"シード値 {self.project.seed} の曲を再現 "
+                        f"(コード進行 {self._progression_text()})。")
+
+    def generate_surprise(self):
+        """サプライズ — 曲調・音色・シード値をまるごとランダムに選んで作る。
+
+        65 種類の曲調から思いがけない組み合わせに出会うための一発ボタン。
+        """
+        scale = random.choice(SCALE_IDS)
+        sound = random.choice(theme.SOUND_IDS)
+        seed = random.randint(SEED_MIN, SEED_MAX)
+        p = self.project
+        # フォト音階は写真が要るので通常の曲調から選ぶ (SCALE_IDS は通常のみ)
+        p = actions.set_scale(p, scale)
+        p = actions.set_sound(p, sound)
+        p = actions.set_seed(p, seed)
+        p = actions.generate_phrase(p)
+        self.commit(p, full=True)
+        self._ensure_theme()  # 選ばれた音色に配色を合わせる
+        from ..core.music import SCALES as _SCALES
+        self.set_status(f"🎲 「{_SCALES[scale]['label']}」×「{theme.SOUND_LABELS[sound]}」"
+                        f"×シード値 {seed} (コード進行 {self._progression_text()})！")
 
     def arrange_accompaniment(self):
         """盤面のメロディに合わせて他パート (ベース・サブ・リズム) を自動生成する。"""
@@ -928,6 +1018,7 @@ class PicoSeqApp:
     def do_save(self):
         storage.save_text(self.autosave_file, dumps(self.project))
         self.saved_snapshot = dumps(self.project)
+        self._set_dirty(False)
         self.set_status(f"保存しました → {self.autosave_file}")
 
     def do_load(self):
@@ -971,7 +1062,9 @@ class PicoSeqApp:
         self.saved_snapshot = dumps(project)
         self.selected_pattern = next(
             (i for i, p in enumerate(project.patterns) if p.used), -1)
-        self.refresh_all()
+        if not self._ensure_theme():  # 別の音色で保存したデータなら配色も合わせる
+            self.refresh_all()
+        self._set_dirty(False)
         self.set_status(ok_message)
 
     def do_export_wav(self, mode):
@@ -998,6 +1091,23 @@ class PicoSeqApp:
             self.set_status(f"書き出しました → {path} ({seconds:.1f} 秒)")
 
         self._run_bg(work, done)
+
+    def do_export_midi(self, mode):
+        """フレーズ／ソングを MIDI ファイルとして書き出す (DAW や楽譜ソフト用)。"""
+        project = self.project
+        if mode == "song" and used_blocks(project.song) == 0:
+            self.alert("ソングが空です。先にフレーズを配置してください。")
+            return
+        if mode == "phrase" and count_notes(project.phrase) == 0:
+            self.alert("フレーズが空です。")
+            return
+        name = "picoseq_song.mid" if mode == "song" else "picoseq_phrase.mid"
+        path = self._ask_save_path("MIDI を書き出す", name, [("MIDI ファイル", "*.mid")])
+        if not path:
+            return
+        data = song_midi(project) if mode == "song" else phrase_midi(project)
+        Path(path).write_bytes(data)
+        self.set_status(f"MIDI を書き出しました → {path}")
 
     def _ask_save_path(self, title, initial, filetypes):
         if self.silent:
@@ -1067,6 +1177,7 @@ class PicoSeqApp:
             self.generate_from_seed_entry()
             assert count_notes(self.project.phrase) > 0
             assert self.project.seed == 42
+            assert "→" in self._progression_text()  # コード進行の表示が作れる
             self.generate_auto()  # 統合された自動作成 (新しい番号で作る)
             assert count_notes(self.project.phrase) > 0
             self.save_current_pattern()
@@ -1086,6 +1197,18 @@ class PicoSeqApp:
             assert self.project.parts[2].tone == 70
             assert self.project.parts[2].gate == 40
 
+            # すべての曲調で自動作成が破綻しない (13 曲調)
+            from ..core.music import SCALE_IDS as _SCALE_IDS
+            for index, scale_id in enumerate(_SCALE_IDS):
+                self._syncing = True
+                self.scale_box.current(index)
+                self._syncing = False
+                self._on_scale_change()
+                assert self.project.scale == scale_id
+                self.generate_auto()
+                assert count_notes(self.project.phrase) > 0
+            self.select_part(0)
+
             # 自動伴奏: メロディだけ → 4パートに増える
             from ..core.arranger import has_only_melody, melody_notes
             self.clear_phrase()
@@ -1102,12 +1225,60 @@ class PicoSeqApp:
             assert len(melody_notes(self.project)) == mel_before  # メロディは保たれる
             assert self.project.progression is not None
 
+            # 編集ツール: 移調・反転・パート消去
+            self.generate_auto()
+            from ..core.phrase import active_notes as _an
+            pitches_before = sorted(n.pitch for _, n in _an(self.project.phrase)
+                                    if n.wave == 0)
+            self.transpose_up()
+            pitches_after = sorted(n.pitch for _, n in _an(self.project.phrase)
+                                   if n.wave == 0)
+            assert pitches_after and pitches_after != pitches_before
+            self.transpose_down()  # 戻る
+            before_rev = dumps(self.project)
+            self.reverse_phrase_action()
+            self.reverse_phrase_action()  # 2 回で元に戻る
+            assert dumps(self.project) == before_rev
+            self.clear_part_action(2)  # リズムだけ消す
+            assert not any(n.wave == 2 for _, n in _an(self.project.phrase))
+            assert any(n.wave == 0 for _, n in _an(self.project.phrase))  # メロディは残る
+
+            # サプライズ: 曲調・音色・シードがまとめて設定され、配色も追従する
+            self.generate_surprise()
+            assert count_notes(self.project.phrase) > 0
+            assert self.theme_sound == self.project.sound  # 配色と音色が一致
+            self.select_part(0)
+
+            # MIDI 書き出しがフレーズ・ソングとも有効なバイト列を作る
+            from ..core.midiio import phrase_midi as _pm
+            self.generate_auto()
+            assert _pm(self.project)[:4] == b"MThd"
+
+            # 音色をまたぐ保存 → 読込で配色が正しく同期する (回帰: テーマ同期バグ)
+            import picoseq.core.actions as _acts
+            self.project = _acts.set_sound(self.project, "clear32")
+            self._apply_theme("clear32")
+            self.do_save()
+            self.project = _acts.set_sound(self.project, "retro8")
+            self._apply_theme("retro8")
+            assert self.theme_sound == "retro8"
+            self.do_load()  # clear32 で保存したデータ
+            assert self.project.sound == "clear32"
+            assert self.theme_sound == "clear32"  # 配色も clear32 に戻っている
+
             # 保存 → 読込の往復
             self.do_save()
             saved = self.project
             self.clear_phrase()
             self.do_load()
             assert self.project == saved
+
+            # 未保存インジケータ: 編集で立ち、保存で消える
+            self.roll_press(72, 0)
+            self.roll_release()
+            assert self._dirty is True
+            self.do_save()
+            assert self._dirty is False
 
             # 旧版データの取り込み (テキスト経由)
             legacy = '{"beats": 4, "currentBuffer": [%d], "favorites": [], "isUsed": []}' % (
@@ -1231,12 +1402,24 @@ class PicoSeqApp:
     def _apply_theme(self, sound):
         """パレットを切り替えて画面全体を作り直す (曲データはそのまま)。"""
         theme.set_palette(sound)
+        self.theme_sound = sound
         for child in self.root.winfo_children():
             child.destroy()
         self.root.configure(bg=theme.BG)
         self._build_ui()
         self.switch_tab(self.tab, stop=False)  # 再生は止めない
         self.refresh_all()
+
+    def _ensure_theme(self) -> bool:
+        """プロジェクトの音色と画面の配色がずれていたら合わせ直す。
+
+        別の音色で保存したデータを読み込んだり、音色をまたいで元に戻したときに
+        「音は変わったのに背景が古いまま」になるのを防ぐ。画面を作り直したら True。
+        """
+        if self.project.sound != self.theme_sound:
+            self._apply_theme(self.project.sound)
+            return True
+        return False
 
     def _on_seed_change(self):
         if self._syncing:

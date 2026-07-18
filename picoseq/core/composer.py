@@ -17,7 +17,7 @@ from .constants import (
     WAVE_TRIANGLE,
     steps_per_phrase,
 )
-from .music import chord_at, root_note, scale_pitches
+from .music import chord_at, progression_choices, root_note, scale_pitches
 from .note import Note
 from .phrase import build_phrase
 from .prng import Rng
@@ -53,6 +53,25 @@ def accompany_notes(beats: int, key: int, scale_id: str, seed: int,
                           with_melody=False)
 
 
+def _pick_progression(rng, scale_id, custom, progression):
+    """進行指定が無ければ、rng の最初の一手でコード進行を選ぶ。
+
+    compose と chosen_progression が同じ結果を返すよう、選択はここに一本化する。
+    """
+    if progression is not None:
+        return tuple(progression)
+    choices = progression_choices(scale_id, custom)
+    return choices[rng.next_int(len(choices))]
+
+
+def chosen_progression(scale_id: str, seed: int, custom=None, progression=None) -> tuple:
+    """その設定で実際に使われるコード進行を返す (表示用)。
+
+    compose と同じ Rng(seed) の最初の一手を使うので、結果は必ず一致する。
+    """
+    return _pick_progression(Rng(seed), scale_id, custom, progression)
+
+
 def _compose_notes(beats, key, scale_id, seed, progression, custom, with_melody):
     """パート生成の共通処理。生成順 (ベース→サブ→リズム→メロディ) は保つ。"""
     rng = Rng(seed)
@@ -63,6 +82,9 @@ def _compose_notes(beats, key, scale_id, seed, progression, custom, with_melody)
         dur = min(dur, steps - step)
         if PITCH_MIN <= pitch <= PITCH_MAX and dur >= 1:
             notes.append(Note(pitch, step, wave, dur))
+
+    # 進行が指定されていなければ、シード値でコード進行を 1 つ選ぶ
+    progression = _pick_progression(rng, scale_id, custom, progression)
 
     def chord_of(step):
         return chord_at(key, scale_id, step, beats, progression, custom)
