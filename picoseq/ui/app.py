@@ -40,6 +40,7 @@ from ..core.song import used_blocks
 from ..core.wavio import wav_bytes
 from . import storage, theme
 from .help import HelpDialog
+from .hum import HumDialog
 from .photo import PhotoDialog, analyze_photo
 from .playback import PlayClock, SoundPlayer, rotate_pcm
 from .roll_view import RollView
@@ -166,10 +167,18 @@ class PicoSeqApp:
         self.tab_phrase_btn.pack(side="left", padx=(16, 2))
         self.tab_song_btn.pack(side="left", padx=2)
 
+        tk.Label(header, text="音色", font=theme.FONT_SMALL,
+                 bg=theme.BG, fg=theme.TEXT_DIM).pack(side="left", padx=(14, 2))
+        self.sound_box = ttk.Combobox(
+            header, values=[theme.SOUND_LABELS[s] for s in theme.SOUND_IDS],
+            state="readonly", width=13, font=theme.FONT_SMALL)
+        self.sound_box.pack(side="left")
+        self.sound_box.bind("<<ComboboxSelected>>", lambda e: self._on_sound_change())
+
         tk.Label(header, text="テンポ", font=theme.FONT_SMALL,
-                 bg=theme.BG, fg=theme.TEXT_DIM).pack(side="left", padx=(20, 2))
+                 bg=theme.BG, fg=theme.TEXT_DIM).pack(side="left", padx=(12, 2))
         self.bpm_scale = tk.Scale(
-            header, from_=BPM_MIN, to=BPM_MAX, orient="horizontal", length=140,
+            header, from_=BPM_MIN, to=BPM_MAX, orient="horizontal", length=110,
             showvalue=0, command=self._on_bpm_change, bg=theme.BG, fg=theme.TEXT,
             troughcolor=theme.PANEL, highlightthickness=0, bd=0,
             activebackground=theme.ACCENT,
@@ -203,10 +212,9 @@ class PicoSeqApp:
 
         self.beats_box = self._combo(bar1, "拍子", [f"{n}/4" for n in range(2, 8)], self._on_beats_change, width=5)
         self.key_box = self._combo(bar1, "キー", list(KEY_NAMES), self._on_key_change, width=8)
-        scale_labels = [SCALES[s]["label"] for s in SCALE_IDS]
-        self.scale_box = self._combo(bar1, "曲調", scale_labels, self._on_scale_change, width=16)
+        self.scale_box = self._combo(bar1, "曲調", self._scale_labels(), self._on_scale_change, width=16)
 
-        tk.Label(bar1, text="シード", font=theme.FONT_SMALL,
+        tk.Label(bar1, text="シード値", font=theme.FONT_SMALL,
                  bg=theme.PANEL, fg=theme.TEXT_DIM).pack(side="left", padx=(12, 2))
         self.seed_var = tk.StringVar()
         self.seed_spin = tk.Spinbox(
@@ -216,10 +224,10 @@ class PicoSeqApp:
         )
         self.seed_spin.pack(side="left")
         self.seed_spin.bind("<FocusOut>", lambda e: self._on_seed_change())
-        self.seed_spin.bind("<Return>", lambda e: self._on_seed_change())
+        self.seed_spin.bind("<Return>", lambda e: self.generate_from_seed_entry())
 
-        self._button(bar1, "✨ 自動作成", self.generate_with_seed).pack(side="left", padx=(8, 2))
-        self._button(bar1, "🎲 おまかせ", self.generate_random).pack(side="left", padx=2)
+        self._button(bar1, "✨ 自動作成", self.generate_auto).pack(side="left", padx=(8, 2))
+        self._button(bar1, "🎤 鼻歌から", self.hum_compose).pack(side="left", padx=2)
         self._button(bar1, "📷 写真から", self.photo_compose).pack(side="left", padx=2)
         self.arrange_btn = self._button(bar1, "🎸 伴奏づけ", self.arrange_accompaniment)
         self.arrange_btn.pack(side="left", padx=2)
@@ -278,7 +286,8 @@ class PicoSeqApp:
         bar3.pack(fill="x", pady=(0, 6))
         self.play_song_btn = self._button(bar3, "▶ ソング再生", lambda: self.toggle_play("song"), accent=True)
         self.play_song_btn.pack(side="left", padx=(0, 12))
-        self._button(bar3, "🗑 構成クリア", self.clear_song, danger=True).pack(side="left", padx=2)
+        self._button(bar3, "✨ ソング自動作成", self.generate_song_auto).pack(side="left", padx=2)
+        self._button(bar3, "🗑 構成クリア", self.clear_song, danger=True).pack(side="left", padx=(12, 2))
         self._button(bar3, "🎵 WAV書出", lambda: self.do_export_wav("song")).pack(side="left", padx=(12, 2))
 
         palette = tk.Frame(self.song_frame, bg=theme.PANEL)
@@ -377,6 +386,13 @@ class PicoSeqApp:
     # 画面の更新
     # ==============================
 
+    def _scale_labels(self) -> list:
+        """曲調セレクタの選択肢。フォト音階があれば末尾に加わる。"""
+        labels = [SCALES[s]["label"] for s in SCALE_IDS]
+        if self.project.custom_scale is not None:
+            labels.append("📷 フォト音階")
+        return labels
+
     def refresh_all(self):
         self._syncing = True
         try:
@@ -385,7 +401,12 @@ class PicoSeqApp:
             self.bpm_var.set(str(p.bpm))
             self.beats_box.current(p.beats - 2)
             self.key_box.current(p.key)
-            self.scale_box.current(SCALE_IDS.index(p.scale))
+            self.scale_box.configure(values=self._scale_labels())
+            if p.scale == "photo":
+                self.scale_box.current(len(SCALE_IDS))
+            else:
+                self.scale_box.current(SCALE_IDS.index(p.scale))
+            self.sound_box.current(theme.SOUND_IDS.index(p.sound))
             self.seed_var.set(str(p.seed))
             self.tone_scale.set(p.parts[self.part].tone)
             self.gate_scale.set(p.parts[self.part].gate)
@@ -446,8 +467,9 @@ class PicoSeqApp:
         beat = step % (beats * 4) // 4 + 1
         self.cell_var.set(f"{note_name(pitch)} ・ {measure}小節 {beat}拍")
 
-    def switch_tab(self, name):
-        self.stop_playback()
+    def switch_tab(self, name, stop=True):
+        if stop:
+            self.stop_playback()
         self.tab = name
         if name == "phrase":
             self.song_frame.pack_forget()
@@ -530,10 +552,11 @@ class PicoSeqApp:
         if self.play_mode or self.silent:
             return
         params = self.project.parts[self.part]
-        key = (self.part, pitch, params.tone, params.gate)
+        key = (self.part, pitch, params.tone, params.gate, self.project.sound)
         wav = self._preview_cache.get(key)
         if wav is None:
-            wav = wav_bytes(render_preview(self.part, pitch, params.tone, params.gate))
+            wav = wav_bytes(render_preview(self.part, pitch, params.tone,
+                                           params.gate, sound=self.project.sound))
             if len(self._preview_cache) > 48:
                 self._preview_cache.clear()
             self._preview_cache[key] = wav
@@ -547,13 +570,9 @@ class PicoSeqApp:
             self.commit(actions.clear_phrase(self.project))
             self.set_status("フレーズを消しました (↩ で戻せます)。")
 
-    def generate_with_seed(self):
-        self._on_seed_change()
-        self.commit(actions.generate_phrase(self.project))
-        self.set_status(f"シード {self.project.seed} でフレーズを作成しました。")
-
-    def generate_random(self):
-        seed = random.randint(SEED_MIN, SEED_MAX)  # シード選びだけ乱数。結果は project に記録される
+    def generate_auto(self):
+        """自動作成 — 毎回新しい「シード値」を選んで作る。番号は記録され再現できる。"""
+        seed = random.randint(SEED_MIN, SEED_MAX)  # 番号選びだけ乱数。結果は project に記録される
         p = actions.set_seed(self.project, seed)
         self.commit(actions.generate_phrase(p))
         self._syncing = True
@@ -561,7 +580,14 @@ class PicoSeqApp:
             self.seed_var.set(str(seed))
         finally:
             self._syncing = False
-        self.set_status(f"シード {seed} でフレーズを作成しました。気に入ったら ★ 登録!")
+        self.set_status(f"シード値 {seed} で作成しました。気に入ったら ★ 登録! "
+                        "(番号を入力して Enter で同じ曲を再現できます)")
+
+    def generate_from_seed_entry(self):
+        """シード値の欄で Enter — その番号の曲を再現する。"""
+        self._on_seed_change()
+        self.commit(actions.generate_phrase(self.project))
+        self.set_status(f"シード値 {self.project.seed} の曲を再現しました。")
 
     def arrange_accompaniment(self):
         """盤面のメロディに合わせて他パート (ベース・サブ・リズム) を自動生成する。"""
@@ -580,11 +606,34 @@ class PicoSeqApp:
         HelpDialog(self)
 
     # ==============================
-    # フォト和音 (写真から作曲)
+    # 鼻歌 (歌ってメロディを作る)
+    # ==============================
+
+    def hum_compose(self):
+        """鼻歌ダイアログを開く。"""
+        if self.silent:
+            return
+        HumDialog(self)
+
+    def apply_hum_melody(self, notes):
+        """聞き取ったメロディをメロディパートへ置く (他のパートは残す)。"""
+        from ..core.constants import WAVE_PULSE
+        from ..core.phrase import active_notes, build_phrase
+        others = [n for _, n in active_notes(self.project.phrase)
+                  if n.wave != WAVE_PULSE]
+        buffer = build_phrase(list(notes) + others)
+        self.commit(actions.update(self.project, phrase=buffer))
+        self.switch_tab("phrase")
+        self.select_part(0)
+        self.set_status(f"鼻歌から {len(notes)} 音のメロディを置きました。"
+                        "「🎸 伴奏づけ」で伴奏も付けられます。")
+
+    # ==============================
+    # フォト音階 (写真から音階を取り込む)
     # ==============================
 
     def photo_compose(self):
-        """写真を選んで四角形を解析し、ダイアログで確認してから適用する。"""
+        """写真を選んで四角形を解析し、ダイアログで確認してから取り込む。"""
         if self.silent:
             return
         path = filedialog.askopenfilename(
@@ -598,32 +647,32 @@ class PicoSeqApp:
             return analyze_photo(path)
 
         def done(result):
-            grid, quad, harmony = result
-            if quad is None:
+            grid, quads, photo = result
+            if not quads:
                 self.alert("四角形が見つかりませんでした。\n"
                            "被写体 (紙・カードなど) と背景の明暗差をはっきりさせてください。")
                 return
-            self.set_status("四角形を検出しました。内容を確認して適用してください。")
-            PhotoDialog(self, grid, quad, harmony)
+            self.set_status(f"四角形を {len(quads)} 個検出しました。内容を確認してください。")
+            PhotoDialog(self, grid, quads, photo)
 
         self._run_bg(work, done)
 
-    def apply_photo_harmony(self, harmony):
-        """解析結果 (キー・音階・進行・テンポ・シード) を適用して自動作成する。
+    def apply_photo_scale(self, photo, generate: bool):
+        """写真から抽出した音階を「📷 フォト音階」として曲調に追加する。
 
-        すべて確定入力としてプロジェクトに記録されるので、
-        保存すれば同じ曲をいつでも再現できる。1 回のアンドゥで戻せる。
+        キー・テンポ・シード値も写真由来の値で設定される。
+        generate=True ならそのまま自動作成まで行う。1 回のアンドゥで戻せる。
         """
-        p = self.project
-        p = actions.set_scale(p, harmony.scale)  # 先に音階 (進行をリセットするため)
-        p = actions.set_key(p, harmony.key)
-        p = actions.set_bpm(p, harmony.bpm)
-        p = actions.set_seed(p, harmony.seed)
-        p = actions.set_progression(p, harmony.progression)
-        p = actions.generate_phrase(p)
+        p = actions.set_custom_scale(self.project, photo.key, photo.intervals,
+                                     photo.bpm, photo.seed)
+        if generate:
+            p = actions.generate_phrase(p)
         self.commit(p, full=True)
         self.switch_tab("phrase")
-        self.set_status("写真から作曲しました。気に入ったら ★ 登録! (曲調を変えると進行は既定に戻ります)")
+        if generate:
+            self.set_status("写真の音階で作曲しました。曲調に「📷 フォト音階」が追加されています。")
+        else:
+            self.set_status("曲調に「📷 フォト音階」を追加しました。この音だけで作曲してみましょう。")
 
     # ==============================
     # パターンとソング
@@ -674,6 +723,22 @@ class PicoSeqApp:
 
     def song_erase(self, track, block):
         self.commit(actions.erase_song_cell(self.project, track, block))
+
+    def generate_song_auto(self):
+        """1 曲ぶんの自動作成 — 新しいシード値でパターンと構成を丸ごと作る。"""
+        touched = (used_blocks(self.project.song) > 0
+                   or any(p.used for p in self.project.patterns[:4]))
+        if touched and not self.confirm(
+                "ソング自動作成",
+                "パターン 1〜4 とソング構成を作り直します。続けますか?\n(パターン 5〜8 は残ります)"):
+            return
+        seed = random.randint(SEED_MIN, SEED_MAX)
+        p = actions.set_seed(self.project, seed)
+        self.commit(actions.generate_song(p), full=True)
+        self.selected_pattern = 1  # Aメロを選んでおく
+        self._update_palette()
+        self.set_status(f"シード値 {seed} で 1 曲作りました。"
+                        "イントロ→Aメロ→Bメロ→アウトロの構成です。▶ で聴いてみましょう。")
 
     def clear_song(self):
         if used_blocks(self.project.song) == 0:
@@ -995,11 +1060,14 @@ class PicoSeqApp:
             self.roll_release()     # ドラッグしていないので削除になる
             assert count_notes(self.project.phrase) == 0
 
-            # 自動作成 → パターン登録 → ソング配置
+            # 自動作成 (シード値の再現) → パターン登録 → ソング配置
             self._syncing = True
             self.seed_var.set("42")
             self._syncing = False
-            self.generate_with_seed()
+            self.generate_from_seed_entry()
+            assert count_notes(self.project.phrase) > 0
+            assert self.project.seed == 42
+            self.generate_auto()  # 統合された自動作成 (新しい番号で作る)
             assert count_notes(self.project.phrase) > 0
             self.save_current_pattern()
             assert self.project.patterns[0].used
@@ -1047,22 +1115,64 @@ class PicoSeqApp:
             self._load_text(legacy, "legacy ok")
             assert count_notes(self.project.phrase) == 1
 
-            # フォト和音: 合成写真 → 解析 → 適用
+            # フォト音階: 合成写真 (四角形 2 個) → 解析 → 曲調へ追加
             body = bytearray()
             for y in range(120):
                 for x in range(160):
-                    v = 230 if (30 <= x <= 130 and 20 <= y <= 90) else 40
+                    in_a = 15 <= x <= 70 and 20 <= y <= 90
+                    in_b = 100 <= x <= 140 and 30 <= y <= 80
+                    v = 230 if (in_a or in_b) else 40
                     body += bytes((v, v, v))
             photo_path = Path(tempfile.mkdtemp()) / "quad.ppm"
             photo_path.write_bytes(b"P6\n160 120\n255\n" + bytes(body))
-            grid, quad, harmony = analyze_photo(photo_path)
-            assert quad is not None and harmony is not None
-            self.apply_photo_harmony(harmony)
-            assert self.project.progression == harmony.progression
-            assert self.project.seed == harmony.seed
+            grid, quads, photo = analyze_photo(photo_path)
+            assert len(quads) == 2, len(quads)
+            assert photo is not None
+            self.apply_photo_scale(photo, generate=True)
+            assert self.project.scale == "photo"
+            assert self.project.custom_scale == photo.intervals
             assert count_notes(self.project.phrase) > 0
+            assert "フォト音階" in self._scale_labels()[-1]
             self.undo_action()  # 1 回のアンドゥで写真適用前へ戻る
-            assert self.project.progression is None
+            assert self.project.scale != "photo"
+
+            # 鼻歌: 合成音声 (2 音) → メロディ化
+            from ..core.humming import detect_melody
+            import math as _math
+            rate = 22050
+            samples = []
+            for freq in (220.0, 330.0):
+                for i in range(rate):
+                    samples.append(int(12000 * _math.sin(2 * _math.pi * freq * i / rate)))
+            melody = detect_melody(samples, rate, steps_of(self.project),
+                                   self.project.key, self.project.scale,
+                                   self.project.custom_scale)
+            assert melody, "鼻歌を検出できない"
+            self.apply_hum_melody(melody)
+            from ..core.arranger import melody_notes as _mel
+            assert len(_mel(self.project)) == len(melody)
+
+            # 音色セット: 切替で音・背景テーマの両方が変わり、画面が作り直される
+            self._syncing = True
+            self.sound_box.current(1)  # warm16
+            self._syncing = False
+            self._on_sound_change()
+            assert self.project.sound == "warm16"
+            assert theme.BG == theme.PALETTES["warm16"]["BG"]
+            self.roll_press(60, 0)  # 作り直した画面でも操作できる
+            self.roll_release()
+            self.undo_action()
+            self._syncing = True
+            self.sound_box.current(0)  # retro8 に戻す
+            self._syncing = False
+            self._on_sound_change()
+            assert theme.BG == theme.PALETTES["retro8"]["BG"]
+
+            # ソング自動作成: 1 曲ぶんの構成ができる
+            self.generate_song_auto()
+            assert used_blocks(self.project.song) == 16
+            assert all(p.used for p in self.project.patterns[:4])
+            assert not any(p.used for p in self.project.patterns[4:])
 
             self.refresh_all()
             self.root.update_idletasks()
@@ -1103,8 +1213,30 @@ class PicoSeqApp:
     def _on_scale_change(self):
         if self._syncing:
             return
-        scale_id = SCALE_IDS[self.scale_box.current()]
+        index = self.scale_box.current()
+        scale_id = "photo" if index >= len(SCALE_IDS) else SCALE_IDS[index]
         self.commit(actions.set_scale(self.project, scale_id), full=True)
+
+    def _on_sound_change(self):
+        """音色セットの切替。音と一緒に画面の配色も変わる。"""
+        if self._syncing:
+            return
+        sound = theme.SOUND_IDS[self.sound_box.current()]
+        if not self.commit(actions.set_sound(self.project, sound)):
+            return
+        self._apply_theme(sound)
+        label = theme.SOUND_LABELS[sound]
+        self.set_status(f"音色を「{label}」に変えました。背景も衣替えしています。")
+
+    def _apply_theme(self, sound):
+        """パレットを切り替えて画面全体を作り直す (曲データはそのまま)。"""
+        theme.set_palette(sound)
+        for child in self.root.winfo_children():
+            child.destroy()
+        self.root.configure(bg=theme.BG)
+        self._build_ui()
+        self.switch_tab(self.tab, stop=False)  # 再生は止めない
+        self.refresh_all()
 
     def _on_seed_change(self):
         if self._syncing:
@@ -1148,13 +1280,17 @@ def _load_demo(app):
     import os
     if os.environ.get("PICOSEQ_DEMO_TAB") == "song":
         app.switch_tab("song")
-    photo = os.environ.get("PICOSEQ_DEMO_PHOTO")
-    if photo:
+    photo_path = os.environ.get("PICOSEQ_DEMO_PHOTO")
+    if photo_path:
         def open_photo():
-            grid, quad, harmony = analyze_photo(photo)
-            if quad is not None:
-                PhotoDialog(app, grid, quad, harmony)
+            grid, quads, photo = analyze_photo(photo_path)
+            if quads:
+                PhotoDialog(app, grid, quads, photo)
         app.root.after(400, open_photo)
+    demo_sound = os.environ.get("PICOSEQ_DEMO_SOUND")
+    if demo_sound in theme.SOUND_IDS:
+        app.project = actions.set_sound(app.project, demo_sound)
+        app._apply_theme(demo_sound)
     if os.environ.get("PICOSEQ_DEMO_HELP"):
         app.root.after(400, app.show_help)
 

@@ -165,31 +165,92 @@ def _order_corners(corners: list) -> tuple:
     return (tl, tr, br, bl)
 
 
-def detect_quad(grid: list):
-    """格子から最も四角形らしい領域を探す。見つからなければ None。"""
+MAX_QUADS = 8
+
+
+def quantile_threshold(grid: list, percent: int) -> int:
+    """輝度ヒストグラムの percent % 点。中間調の被写体を拾う補助しきい値。"""
+    hist = [0] * 256
+    for row in grid:
+        for v in row:
+            hist[v] += 1
+    target = sum(hist) * percent // 100
+    total = 0
+    for t in range(256):
+        total += hist[t]
+        if total >= target:
+            return t
+    return 255
+
+
+def _bbox(points) -> tuple:
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _bbox_overlap(a, b) -> float:
+    """バウンディングボックスの IoU (重なり具合 0..1)。重複判定に使う。"""
+    ax0, ay0, ax1, ay1 = a
+    bx0, by0, bx1, by1 = b
+    ix = max(0, min(ax1, bx1) - max(ax0, bx0))
+    iy = max(0, min(ay1, by1) - max(ay0, by0))
+    inter = ix * iy
+    if inter == 0:
+        return 0.0
+    area_a = (ax1 - ax0) * (ay1 - ay0)
+    area_b = (bx1 - bx0) * (by1 - by0)
+    return inter / (area_a + area_b - inter)
+
+
+def detect_quads(grid: list, max_count: int = MAX_QUADS) -> list:
+    """格子から四角形らしい領域を複数探す (面積の大きい順、最大 max_count 個)。
+
+    精度向上のため、大津のしきい値に加えて輝度の 30% / 70% 点でも二値化し、
+    明・暗の両方の向きで候補を集める。重なった候補は面積の大きい方を残す。
+    """
     h = len(grid)
     w = len(grid[0]) if h else 0
     if w < 8 or h < 8:
-        return None
-    threshold = otsu_threshold(grid)
+        return []
     min_area = max(16, w * h // MIN_AREA_RATIO)
 
-    best = None
-    for dark in (False, True):
-        for area, borders, pixels in find_components(grid, threshold, dark):
-            if area < min_area or borders == 4:
-                continue
-            hull = convex_hull(pixels)
-            if len(hull) < 3:
-                continue
-            corners = best_quad_corners(hull)
-            area2 = polygon_area2(corners)
-            if area2 <= 0:
-                continue
-            fill = 2 * area / area2
-            if not (FILL_MIN <= fill <= FILL_MAX):
-                continue
-            if best is None or area > best.pixel_area:
-                best = Quad(points=tuple(corners), grid_w=w, grid_h=h,
-                            pixel_area=area, fill=fill)
-    return best
+    thresholds = sorted({otsu_threshold(grid),
+                         quantile_threshold(grid, 30),
+                         quantile_threshold(grid, 70)})
+    candidates = []
+    for threshold in thresholds:
+        for dark in (False, True):
+            for area, borders, pixels in find_components(grid, threshold, dark):
+                if area < min_area or borders == 4:
+                    continue
+                hull = convex_hull(pixels)
+                if len(hull) < 3:
+                    continue
+                corners = best_quad_corners(hull)
+                area2 = polygon_area2(corners)
+                if area2 <= 0:
+                    continue
+                fill = 2 * area / area2
+                if not (FILL_MIN <= fill <= FILL_MAX):
+                    continue
+                candidates.append(Quad(points=tuple(corners), grid_w=w, grid_h=h,
+                                       pixel_area=area, fill=fill))
+
+    # 面積の大きい順に採用し、既に採った四角形と重なるものは捨てる
+    candidates.sort(key=lambda q: (-q.pixel_area, q.points))
+    accepted = []
+    for quad in candidates:
+        box = _bbox(quad.points)
+        if any(_bbox_overlap(box, _bbox(a.points)) > 0.5 for a in accepted):
+            continue
+        accepted.append(quad)
+        if len(accepted) >= max_count:
+            break
+    return accepted
+
+
+def detect_quad(grid: list):
+    """最も大きい四角形を 1 つ返す (無ければ None)。"""
+    quads = detect_quads(grid, max_count=1)
+    return quads[0] if quads else None

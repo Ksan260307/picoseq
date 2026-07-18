@@ -1,4 +1,4 @@
-"""レンダラのテスト — 順序独立性・適応分離・回帰。"""
+"""レンダラのテスト — 加算順序・表示との分離・回帰。"""
 
 import unittest
 import zlib
@@ -23,8 +23,8 @@ from picoseq.core.renderer import _render_events_numpy, _render_events_python
 from picoseq.core.schedule import Event, samples_per_tick
 from picoseq.core.synth import voice_samples
 
-GOLDEN_PHRASE_CRC = 2177879017  # seed=42, 4/4, C minor, 既定パート設定
-GOLDEN_SONG_CRC = 1678626668    # 上記フレーズをパターン0 に保存し ブロック0,1 へ配置
+GOLDEN_PHRASE_CRC = 2900243552  # seed=42, 4/4, C minor, 既定パート設定
+GOLDEN_SONG_CRC = 3632967442    # 上記フレーズをパターン0 に保存し ブロック0,1 へ配置
 
 
 def _seed42_project():
@@ -46,7 +46,7 @@ class TestMixing(unittest.TestCase):
         self.assertTrue(any(v != 0 for v in mix[2 * spt:]))
 
     def test_order_independence(self):
-        """イベントの並び順を変えても結果はビット等価 (順序独立性)。"""
+        """イベントの並び順を変えても結果は完全一致する。"""
         p = new_project()
         events = [Event(0, 60, 0, 4), Event(0, 48, 1, 4), Event(2, 55, 3, 2),
                   Event(2, 60, 2, 1), Event(1, 64, 0, 2)]
@@ -71,7 +71,7 @@ class TestPhraseRender(unittest.TestCase):
         self.assertEqual(zlib.crc32(a), GOLDEN_PHRASE_CRC)
 
     def test_ignores_unrelated_state(self):
-        """フレーズの音は ソング構成・パターン・シードの変更に影響されない (適応分離の類推)。"""
+        """フレーズの音は ソング構成・パターン・シードの変更に影響されない (無関係な設定に音が影響されない)。"""
         p = _seed42_project()
         base = render_phrase(p)
         changed = actions.save_pattern(p, 3)
@@ -144,7 +144,7 @@ class TestLoopRender(unittest.TestCase):
 
 
 class TestBackendEquivalence(unittest.TestCase):
-    """numpy 経路と純 Python 経路はビット等価でなければならない (基準実装照合)。"""
+    """numpy 経路と純 Python 経路は完全一致でなければならない (リファレンス実装との比較)。"""
 
     def _events(self):
         p = _seed42_project()

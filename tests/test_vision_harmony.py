@@ -1,106 +1,100 @@
-"""四角形 → 音楽写像のテスト — 決定論・範囲・仕様どおりの対応。"""
+"""写真 → 音階変換のテスト — 決定論・範囲・仕様どおりの対応。"""
 
 import unittest
 
-from picoseq.core.music import SCALES
 from picoseq.vision.harmony import (
-    PhotoHarmony,
-    chord_name,
-    corner_angles,
+    PhotoScale,
     describe,
-    harmony_from_quad,
-    regularity,
+    photo_scale_from_quads,
+    quad_pitch_class,
+    scale_note_names,
 )
 from picoseq.vision.quad import Quad
 
 
-def _quad(points, grid_w=200, grid_h=150):
+def _quad(points, grid_w=200, grid_h=150, area=1000):
     return Quad(points=tuple(points), grid_w=grid_w, grid_h=grid_h,
-                pixel_area=1000, fill=1.0)
+                pixel_area=area, fill=1.0)
 
 
-SQUARE = _quad([(80, 55), (120, 55), (120, 95), (80, 95)])
+def _rect(cx, cy, half_w=16, half_h=12, **kw):
+    return _quad([(cx - half_w, cy - half_h), (cx + half_w, cy - half_h),
+                  (cx + half_w, cy + half_h), (cx - half_w, cy + half_h)], **kw)
 
 
-class TestAngles(unittest.TestCase):
-    def test_rectangle_angles(self):
-        for angle in corner_angles(SQUARE.points):
-            self.assertAlmostEqual(angle, 90.0, delta=0.01)
+class TestQuadPitch(unittest.TestCase):
+    def test_left_is_low_right_is_high(self):
+        self.assertEqual(quad_pitch_class(_rect(8, 75, half_w=8)), 0)
+        self.assertEqual(quad_pitch_class(_rect(192, 75, half_w=8)), 11)
+        self.assertLess(quad_pitch_class(_rect(50, 75)),
+                        quad_pitch_class(_rect(150, 75)))
 
-    def test_angles_sum_360(self):
-        quad = [(50, 15), (140, 40), (110, 105), (25, 80)]
-        self.assertAlmostEqual(sum(corner_angles(quad)), 360.0, delta=0.1)
-
-    def test_regularity(self):
-        self.assertAlmostEqual(regularity([90, 90, 90, 90]), 1.0)
-        self.assertAlmostEqual(regularity([60, 120, 60, 120]), 1 - 120 / 180)
-        self.assertEqual(regularity([180, 180, 0, 0]), 0.0)
+    def test_x_position_maps_to_12_tones(self):
+        # 中心 x=100/200 → 0.5 * 12 = 6
+        self.assertEqual(quad_pitch_class(_rect(100, 75)), 6)
 
 
-class TestMapping(unittest.TestCase):
-    def test_square_gives_major_and_default_progression(self):
-        harmony = harmony_from_quad(SQUARE)
-        self.assertEqual(harmony.scale, "major")
-        self.assertEqual(harmony.progression, SCALES["major"]["progression"])
+class TestPhotoScale(unittest.TestCase):
+    def test_key_is_largest_quad(self):
+        quads = [_rect(100, 75, area=5000),  # 最大 → キー (半音 6)
+                 _rect(20, 40, area=1000)]
+        photo = photo_scale_from_quads(quads)
+        self.assertEqual(photo.key, 6)
+        self.assertIn(0, photo.intervals)
 
-    def test_skewed_gives_darker_scale(self):
-        # 平行四辺形 (約 63°/117°) → 整形度 ~0.4 → battle
-        skewed = _quad([(60, 40), (140, 40), (170, 100), (90, 100)])
-        harmony = harmony_from_quad(skewed)
-        self.assertIn(harmony.scale, ("japanese", "battle"))
+    def test_intervals_relative_to_key(self):
+        quads = [_rect(100, 75, area=5000),   # 半音 6 = キー
+                 _rect(150, 40, area=2000),   # 半音 9 → +3
+                 _rect(50, 100, area=1000)]   # 半音 3 → +9
+        photo = photo_scale_from_quads(quads)
+        self.assertEqual(photo.intervals, (0, 3, 9))
 
-    def test_key_follows_center_x(self):
-        left = _quad([(4, 55), (36, 55), (36, 95), (4, 95)])
-        right = _quad([(164, 55), (196, 55), (196, 95), (164, 95)])
-        self.assertEqual(harmony_from_quad(left).key, 1)   # 中心 x=20/200 → 1.2
-        self.assertEqual(harmony_from_quad(right).key, 10)  # 中心 x=180/200 → 10.8
-        self.assertLess(harmony_from_quad(left).key, harmony_from_quad(right).key)
+    def test_few_quads_padded_to_three_tones(self):
+        photo = photo_scale_from_quads([_rect(100, 75)])
+        self.assertGreaterEqual(len(photo.intervals), 3)
+        self.assertEqual(photo.intervals[0], 0)
 
-    def test_bpm_follows_area(self):
-        small = _quad([(90, 65), (110, 65), (110, 85), (90, 85)])
-        large = _quad([(10, 10), (190, 10), (190, 140), (10, 140)])
-        self.assertLess(harmony_from_quad(small).bpm, harmony_from_quad(large).bpm)
-        for quad in (small, large):
-            self.assertTrue(60 <= harmony_from_quad(quad).bpm <= 240)
+    def test_max_eight_quads_all_contribute(self):
+        quads = [_rect(10 + i * 25, 75, half_w=8, area=8000 - i)
+                 for i in range(8)]
+        photo = photo_scale_from_quads(quads)
+        self.assertEqual(len(photo.pitch_classes), 8)
+        for iv in photo.intervals:
+            self.assertTrue(0 <= iv <= 11)
 
-    def test_progression_degrees_valid(self):
-        quads = [SQUARE,
-                 _quad([(60, 40), (140, 40), (170, 100), (90, 100)]),
-                 _quad([(50, 15), (140, 40), (110, 105), (25, 80)])]
-        for quad in quads:
-            harmony = harmony_from_quad(quad)
-            n = len(SCALES[harmony.scale]["intervals"])
-            self.assertEqual(len(harmony.progression), 4)
-            for degree in harmony.progression:
-                self.assertTrue(0 <= degree < n)
+    def test_bpm_grows_with_total_area(self):
+        small = photo_scale_from_quads([_rect(100, 75, half_w=10, half_h=8)])
+        large = photo_scale_from_quads([_rect(60, 75, half_w=50, half_h=60),
+                                        _rect(160, 75, half_w=30, half_h=60)])
+        self.assertLess(small.bpm, large.bpm)
+        for photo in (small, large):
+            self.assertTrue(60 <= photo.bpm <= 240)
 
     def test_deterministic(self):
-        quad = _quad([(50, 15), (140, 40), (110, 105), (25, 80)])
-        self.assertEqual(harmony_from_quad(quad), harmony_from_quad(quad))
+        quads = [_rect(100, 75, area=500), _rect(30, 40, area=300)]
+        self.assertEqual(photo_scale_from_quads(quads),
+                         photo_scale_from_quads(quads))
 
     def test_seed_range_and_sensitivity(self):
-        a = harmony_from_quad(SQUARE)
-        moved = _quad([(70, 45), (130, 45), (130, 105), (70, 105)])
-        b = harmony_from_quad(moved)
+        a = photo_scale_from_quads([_rect(100, 75)])
+        b = photo_scale_from_quads([_rect(90, 65)])
         self.assertTrue(1 <= a.seed <= 999_999)
-        self.assertNotEqual(a.seed, b.seed)  # 場所が変われば別の曲
+        self.assertNotEqual(a.seed, b.seed)
+
+    def test_empty_raises(self):
+        with self.assertRaises(ValueError):
+            photo_scale_from_quads([])
 
 
-class TestNaming(unittest.TestCase):
-    def test_chord_names(self):
-        self.assertEqual(chord_name(0, "major", 0), "C")
-        self.assertEqual(chord_name(0, "major", 5), "Am")
-        self.assertEqual(chord_name(0, "major", 6), "Bdim")
-        self.assertEqual(chord_name(0, "minor", 0), "Cm")
-        self.assertEqual(chord_name(9, "minor", 0), "Am")
-
-    def test_describe_mentions_chords(self):
-        harmony = PhotoHarmony(key=0, scale="major", progression=(0, 3, 1, 4),
-                               bpm=120, seed=42)
-        text = describe(harmony)
-        self.assertIn("C", text)
+class TestDescribe(unittest.TestCase):
+    def test_names_and_text(self):
+        photo = PhotoScale(key=0, intervals=(0, 4, 7), bpm=120, seed=42,
+                           pitch_classes=(0, 4, 7))
+        self.assertEqual(scale_note_names(photo), ["C", "E", "G"])
+        text = describe(photo)
+        self.assertIn("C・E・G", text)
         self.assertIn("テンポ: 120", text)
-        self.assertIn("シード: 42", text)
+        self.assertIn("フォト音階", text)
 
 
 if __name__ == "__main__":

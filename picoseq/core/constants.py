@@ -1,10 +1,18 @@
-"""共通定数 — 論理スキーマの限界値とパート定義。"""
+"""共通定数 — データ形式の上限値とパート定義。"""
 
 APP_ID = "picoseq"
-SCHEMA_VERSION = 2  # v2: progression (カスタムコード進行) を追加
+SCHEMA_VERSION = 4  # v2: progression / v3: custom_scale / v4: sound (音色セット)
+
+# 音色セット (シンセの性格)。UI での表示名は theme 側で持つ
+SOUND_SETS = ("retro8", "warm16", "clear32")
+DEFAULT_SOUND = "retro8"
 
 # カスタム進行の長さの上限
 PROGRESSION_MAX_LEN = 16
+
+# フォト音階の音数 (半音クラスの数)
+CUSTOM_SCALE_MIN = 3
+CUSTOM_SCALE_MAX = 12
 
 # 音域 (MIDI ノート番号)
 PITCH_MIN = 36  # C2

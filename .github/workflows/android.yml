@@ -1,0 +1,36 @@
+# スマホ (Android) 向けビルド — モバイル版シェル (mobile/) を APK にする。
+# 手動実行 (workflow_dispatch) か、vX.Y.Z タグの push で動く。
+# 生成された APK は Actions の Artifacts からダウンロードできる。
+
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: モバイル版のソースを組み立てる
+        run: |
+          mkdir -p staging
+          cp -r picoseq staging/
+          cp mobile/main.py staging/main.py
+          cp mobile/buildozer.spec staging/buildozer.spec
+
+      - name: Buildozer で APK を作る
+        uses: ArtemSBulgakov/buildozer-action@v1
+        with:
+          workdir: staging
+          buildozer_version: stable
+
+      - name: APK をアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: picoseq-android
+          path: staging/bin/*.apk

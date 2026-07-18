@@ -1,0 +1,43 @@
+# テストと Windows exe のビルド。push / PR ごとにテストを回し、
+# 手動実行か vX.Y.Z タグで exe を Artifacts に置く。
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: テストを全実行
+        run: python -m unittest -v
+      - name: 画面の自己診断
+        run: python main.py --selftest
+      - name: モバイル版の文法チェック (kivy 無しでも通る)
+        run: python -m py_compile mobile/main.py
+
+  windows-exe:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: PyInstaller で exe を作る
+        run: |
+          python -m pip install pyinstaller numpy pillow
+          python -m PyInstaller --noconfirm --onefile --windowed --name PicoSeq main.py
+      - name: exe をアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: picoseq-windows
+          path: dist/PicoSeq.exe

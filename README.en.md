@@ -1,0 +1,190 @@
+# PicoSeq — Retro Chiptune Sequencer
+
+A desktop app for making and playing 8-bit style chiptune music.
+Place notes on a grid to build a song — or start from a photo or your own humming.
+
+**日本語版: [README.md](README.md)**
+
+## Features
+
+- Draw phrases on a grid, then arrange them into a full song
+- Four layered parts (melody / bass / rhythm / sub)
+- **🎹 Sound sets** — "Pico 8-bit", "Mellow 16-bit", and "Sparkle 32-bit".
+  Switching also re-skins the whole interface to match
+- **✨ Auto-compose** — one-click composition. Keep the "seed value" to recreate the exact same tune anytime.
+  6 bass × 5 backing × 6 drum × 4 melody-rhythm × 3 development styles combine into
+  4000+ base patterns, so every seed sounds different
+- **🎼 Auto-song** — generates a whole intro → A → B → outro song structure in one click
+- **🎤 From humming** — sing into the microphone and PicoSeq turns your pitch into a melody
+  (YIN-style pitch detection that resists octave errors even on harmonic-rich voices)
+- **🎸 Auto-accompany** — draw only a melody and matching bass, drums, and backing are generated
+- **📷 From a photo** — up to 8 rectangles found in a photo become a set of "allowed notes",
+  added to the mood selector as a *Photo Scale* — compose using only those notes for inspiration
+- **Live updates** — add, remove, and stretch notes (or change the tempo) while the song keeps playing
+- Audio is synthesized with integer math only, so the same project produces a bit-identical WAV on any machine
+- Runs on the Python standard library alone — nothing to install
+
+Optional extras: `numpy` (faster rendering) and `Pillow` (JPEG photos).
+Everything works without them (PNG / BMP / PPM decoders are built in).
+
+## Getting started
+
+Python 3.9+ (built for Windows).
+
+```console
+py main.py            # launch the app
+py main.py --demo     # launch with a demo song loaded
+py main.py --selftest # run a headless self-check (exit code 0 = OK)
+py -m unittest        # run the full test suite
+py -m picoseq.vision photo.jpg   # inspect photo analysis from the command line
+```
+
+Sound playback uses the built-in Windows audio API. On other systems, editing and
+WAV export still work, but live playback is silent.
+
+### Building an exe
+
+To build a single distributable executable (installs PyInstaller on first run):
+
+```console
+build_exe.bat
+```
+
+This produces `dist\PicoSeq.exe`, which runs on PCs without Python installed.
+
+### Building for phones (Android)
+
+The desktop UI (tkinter) cannot run on phones, so a **lightweight mobile shell**
+(`mobile/`) reuses the same composition engine. The `Android APK` GitHub Actions
+workflow (manual dispatch, or pushing a `v*` tag) packages `mobile/main.py` plus the
+`picoseq` package into an APK with Buildozer; download it from the workflow Artifacts.
+See `.github/workflows/android.yml` and `mobile/buildozer.spec`.
+
+Mobile features: auto-compose, auto-song, sound set / mood / seed controls, loop playback.
+Note: the APK build is verified in CI only — test on your own device.
+
+`ci.yml` runs the full test suite and the UI self-check on every push / PR,
+and also uploads a Windows exe on tags.
+
+## How to use
+
+**Phrase tab**
+
+- Left-click a cell to place a note; **drag right to stretch it**
+- Click a note (or right-click) to erase it
+- Click the piano keys on the left to preview a pitch
+- Switch parts with the part buttons or keys `1`–`4`
+- Shape each part's sound with the *tone* and *length* sliders
+- **✨ Auto-compose** — each press picks a fresh seed value; type a number and press Enter to recreate that exact tune
+- **🎤 From humming** — record 6 seconds (or open a WAV file) to extract a melody
+- **🎸 Auto-accompany** — generates the other three parts to fit your melody
+- **★ Save** — store up to 8 favorite phrases as patterns
+
+**📷 From a photo (Photo Scale)**
+
+1. Click 📷 and pick a photo with clearly visible rectangular objects (books, cards, windows…)
+2. Up to 8 detected rectangles are shown, each labeled with its note
+3. Choose *compose with this scale* or *just import the scale*
+
+Conversion rules (the same photo always gives the same result):
+
+| Photo feature | Musical meaning |
+| --- | --- |
+| Horizontal position of each rectangle | Its note (left = low, right = high) |
+| The largest rectangle | The key (home note) |
+| All rectangle notes together | The *Photo Scale* — the set of allowed notes |
+| Total rectangle area | Tempo (bigger = faster) |
+| Fine corner positions | Seed value (same photo → same song) |
+
+The imported scale stays available in the mood selector as *📷 Photo Scale*.
+
+**Song tab**
+
+- **✨ Auto-song** — generates patterns 1–4 (intro / A / B / outro) and the full
+  16-block arrangement in one click; press ▶ to hear a complete piece
+- Pick a pattern from the palette and place it on the 4-track × 16-block grid
+- Horizontal = sequence, vertical = play together
+- *WAV export* renders the whole song to an audio file
+
+**Playback & sound sets**
+
+- `Space` to play / stop (loops)
+- **Edits are reflected live while playing** — no need to stop
+- Tempo changes apply during playback too
+- The *sound* selector in the header changes the overall character —
+  **the color scheme changes with it** (green → purple → indigo), and the choice is saved
+
+**Keyboard**
+
+| Key | Action |
+| --- | --- |
+| `Space` / `Esc` | Play & stop / stop |
+| `1`–`4` | Switch part |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
+| `Ctrl+Tab` | Phrase ⇄ Song tab |
+| `F1` | Help |
+
+## Under the hood (for developers)
+
+Logic (`picoseq/core/`, pure functions only) is separated from the UI (`picoseq/ui/`).
+All randomness derives from the seed value and all audio synthesis uses integer math,
+so **the same project renders a bit-identical WAV in any environment**.
+
+```
+picoseq/
+├── main.py                launcher (--selftest / --demo)
+├── build_exe.bat          exe build script
+├── picoseq/
+│   ├── core/              logic (pure functions; no I/O, drawing, or wall-clock)
+│   │   ├── constants.py   limits and part definitions
+│   │   ├── prng.py        deterministic random generator (seeded)
+│   │   ├── music.py       keys / scales / chords / pitch table (incl. photo scales)
+│   │   ├── note.py        one note packed into a 32-bit integer
+│   │   ├── phrase.py      phrase (note collection) operations
+│   │   ├── song.py        song-grid operations
+│   │   ├── project.py     the whole app state (immutable object)
+│   │   ├── actions.py     every edit operation (pure functions)
+│   │   ├── composer.py    auto-composition and accompaniment
+│   │   ├── arranger.py    chord inference from a melody
+│   │   ├── humming.py     pitch detection (autocorrelation, integer math)
+│   │   ├── schedule.py    timing and event expansion
+│   │   ├── synth.py       fixed-point synth (pulse/triangle/noise/saw)
+│   │   ├── renderer.py    mixer (voice cache, optional numpy fast path)
+│   │   ├── wavio.py       WAV encoding
+│   │   ├── serialize.py   versioned JSON save files + legacy migration
+│   │   └── history.py     undo / redo
+│   ├── vision/            photo scale (image analysis)
+│   │   ├── image.py       image loading (built-in PNG/BMP/PPM decoders)
+│   │   ├── quad.py        rectangle detection (multi-threshold, up to 8, dedup)
+│   │   ├── harmony.py     rectangles → musical scale
+│   │   └── __main__.py    CLI inspector
+│   └── ui/                screen (state changes only via actions)
+│       ├── app.py         wiring, live re-rendering
+│       ├── roll_view.py   piano roll
+│       ├── song_view.py   song grid
+│       ├── photo.py       photo-scale dialog
+│       ├── hum.py         humming dialog
+│       ├── mic.py         microphone recording (native Windows API)
+│       ├── help.py        help screen
+│       ├── playback.py    playback, position clock, mid-loop restart
+│       ├── storage.py     file locations
+│       └── theme.py       colors and fonts
+└── tests/                 test suite (py -m unittest)
+```
+
+### Design principles
+
+| Principle | Meaning |
+| --- | --- |
+| Reproducibility | Randomness comes only from the seed value; same settings → same song, same WAV |
+| Order independence | Mixing is integer addition; processing order never changes the result |
+| Environment independence | Integer-only synthesis; the numpy path is verified bit-identical to pure Python |
+| Display separation | Only the playhead display uses real time; it never affects song data |
+| Versioned saves | JSON with app ID + format version; newer/foreign data is rejected safely |
+| Backward compatibility | Reads v1/v2 saves and even the old browser version's retro_project.json |
+
+### Tests
+
+Run everything with `py -m unittest`. Waveforms and PCM output are pinned by
+checksums, so any change that alters the sound is caught by the tests.
+The UI is exercised end-to-end by `py main.py --selftest`.

@@ -1,8 +1,8 @@
-"""保存形式 — 版付き JSON の符号化・復号と、旧版セーブデータの移行。
+"""保存形式 — バージョン付き JSON の読み書きと、旧版セーブデータの移行。
 
-保存データには必ずアプリ ID とスキーマ版を含める (再生同一性)。
-未知のアプリ ID・新しすぎるスキーマ版は拒否する。
-数値は復号時に必ず範囲へ収め、範囲外の音符は捨てる。
+保存データには必ずアプリ ID と形式バージョンを含める。
+別アプリのデータ・新しすぎるバージョンは読み込みを拒否する。
+数値は読み込み時に必ず範囲へ収め、範囲外の音符は捨てる。
 """
 
 import json
@@ -27,7 +27,8 @@ from .constants import (
     SONG_TRACKS,
     clamp,
 )
-from .music import DEFAULT_SCALE, SCALES
+from .constants import CUSTOM_SCALE_MIN, DEFAULT_SOUND, SOUND_SETS
+from .music import DEFAULT_SCALE, PHOTO_SCALE, SCALES, get_scale
 from .note import Note, is_active, unpack_note
 from .phrase import active_notes, build_phrase
 from .project import PartParams, Pattern, Project
@@ -51,6 +52,8 @@ def to_jsonable(project: Project) -> dict:
         "scale": project.scale,
         "seed": project.seed,
         "progression": list(project.progression) if project.progression is not None else None,
+        "custom_scale": list(project.custom_scale) if project.custom_scale is not None else None,
+        "sound": project.sound,
         "parts": [{"tone": p.tone, "gate": p.gate} for p in project.parts],
         "phrase": _notes_to_json(project.phrase),
         "patterns": [
@@ -94,8 +97,12 @@ def from_jsonable(data: dict) -> Project:
     if schema > SCHEMA_VERSION:
         raise LoadError(f"新しい形式 (schema {schema}) です。アプリを更新してください。")
 
+    custom_scale = _custom_scale_from_json(data.get("custom_scale"))
     scale = data.get("scale")
-    if scale not in SCALES:
+    if scale == PHOTO_SCALE:
+        if custom_scale is None:
+            scale = DEFAULT_SCALE  # フォト音階が壊れていたら既定へ
+    elif scale not in SCALES:
         scale = DEFAULT_SCALE
 
     beats = clamp(_as_int(data.get("beats"), 4), BEATS_MIN, BEATS_MAX)
@@ -114,7 +121,9 @@ def from_jsonable(data: dict) -> Project:
         key=clamp(_as_int(data.get("key"), 0), 0, 11),
         scale=scale,
         seed=clamp(_as_int(data.get("seed"), SEED_MIN), SEED_MIN, SEED_MAX),
-        progression=_progression_from_json(data.get("progression"), scale),
+        progression=_progression_from_json(data.get("progression"), scale, custom_scale),
+        custom_scale=custom_scale,
+        sound=data.get("sound") if data.get("sound") in SOUND_SETS else DEFAULT_SOUND,
         parts=_parts_from_json(data.get("parts")),
         phrase=_notes_from_json(data.get("phrase")),
         patterns=tuple(patterns),
@@ -122,20 +131,38 @@ def from_jsonable(data: dict) -> Project:
     )
 
 
-def _progression_from_json(raw, scale: str):
-    """カスタム進行の検証。不正なら None (スケール既定) に落とす。
+def _progression_from_json(raw, scale: str, custom_scale=None):
+    """カスタム進行の検証。不正なら None (音階の既定) に落とす。
 
     schema 1 のデータには存在しないので、常に None になる (後方互換)。
     """
     if not isinstance(raw, list) or not (1 <= len(raw) <= PROGRESSION_MAX_LEN):
         return None
-    n = len(SCALES[scale]["intervals"])
+    n = len(get_scale(scale, custom_scale)["intervals"])
     degrees = []
     for value in raw:
         if isinstance(value, bool) or not isinstance(value, int) or not (0 <= value < n):
             return None
         degrees.append(value)
     return tuple(degrees)
+
+
+def _custom_scale_from_json(raw):
+    """フォト音階の検証。0 を含む昇順・重複なしの半音列でなければ None。
+
+    schema 1・2 のデータには存在しないので、常に None になる (後方互換)。
+    """
+    if not isinstance(raw, list):
+        return None
+    values = []
+    for value in raw:
+        if isinstance(value, bool) or not isinstance(value, int) or not (0 <= value <= 11):
+            return None
+        values.append(value)
+    normalized = tuple(sorted(set(values)))
+    if len(normalized) < CUSTOM_SCALE_MIN or normalized[0] != 0:
+        return None
+    return normalized
 
 
 def _as_int(value, fallback: int) -> int:

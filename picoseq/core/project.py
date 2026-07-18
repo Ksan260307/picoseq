@@ -1,8 +1,8 @@
-"""プロジェクト状態 — 確定状態 S の全体。frozen dataclass で不変。"""
+"""プロジェクト — アプリの全データを 1 つの不変オブジェクトで持つ。"""
 
 from dataclasses import dataclass, field, replace
 
-from .constants import PART_COUNT, PATTERN_COUNT, steps_per_phrase
+from .constants import DEFAULT_SOUND, PART_COUNT, PATTERN_COUNT, steps_per_phrase
 from .music import DEFAULT_SCALE
 from .phrase import EMPTY_PHRASE
 from .song import EMPTY_SONG
@@ -24,13 +24,15 @@ class Pattern:
 
 @dataclass(frozen=True)
 class Project:
-    """アプリ全体の確定状態。"""
+    """アプリ全体の状態。"""
     bpm: int = 120
     beats: int = 4          # 拍子 (n/4)
     key: int = 0            # 0=C .. 11=B
     scale: str = DEFAULT_SCALE
     seed: int = 1           # 自動作成のシード
-    progression: tuple = None  # カスタムコード進行 (度数の列)。None = スケール既定
+    progression: tuple = None    # カスタムコード進行 (度数の列)。None = 音階の既定
+    custom_scale: tuple = None   # 写真から抽出した音階 (半音の列)。scale="photo" で使う
+    sound: str = DEFAULT_SOUND   # 音色セット (retro8 / warm16 / clear32)
     parts: tuple = tuple(PartParams() for _ in range(PART_COUNT))
     phrase: tuple = EMPTY_PHRASE
     patterns: tuple = tuple(Pattern() for _ in range(PATTERN_COUNT))

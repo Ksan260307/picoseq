@@ -1,33 +1,33 @@
-"""フォト和音ダイアログ — 写真の解析結果をプレビューして適用する。"""
+"""フォト音階ダイアログ — 写真から見つけた四角形と音階をプレビューして取り込む。"""
 
 import tkinter as tk
 
-from ..vision.harmony import describe, harmony_from_quad
+from ..vision.harmony import describe, photo_scale_from_quads, scale_note_names
 from ..vision.image import load_gray_grid
-from ..vision.quad import detect_quad
+from ..vision.quad import detect_quads
 from . import theme
 
 PREVIEW_ZOOM = 2
 
 
 def analyze_photo(path):
-    """写真 → (格子, 四角形 or None, 和音 or None)。裏スレッドで呼べる。"""
+    """写真 → (格子, 四角形リスト, フォト音階 or None)。裏スレッドで呼べる。"""
     grid = load_gray_grid(path)
-    quad = detect_quad(grid)
-    if quad is None:
-        return grid, None, None
-    return grid, quad, harmony_from_quad(quad)
+    quads = detect_quads(grid)
+    if not quads:
+        return grid, [], None
+    return grid, quads, photo_scale_from_quads(quads)
 
 
 class PhotoDialog:
-    """検出した四角形と和音を見せ、「この和音で作曲」を選ばせる。"""
+    """検出した四角形 (最大 8 個) と音階を見せ、取り込み方を選ばせる。"""
 
-    def __init__(self, app, grid, quad, harmony):
+    def __init__(self, app, grid, quads, photo):
         self.app = app
-        self.harmony = harmony
+        self.photo_scale = photo
 
         win = tk.Toplevel(app.root)
-        win.title("フォト和音 — 写真から作曲")
+        win.title("フォト音階 — 写真から音階を取り込む")
         win.configure(bg=theme.BG)
         win.transient(app.root)
         win.grab_set()
@@ -51,28 +51,36 @@ class PhotoDialog:
         self.image = image.zoom(PREVIEW_ZOOM, PREVIEW_ZOOM)  # 参照保持 (GC 対策)
         canvas.create_image(0, 0, anchor="nw", image=self.image)
 
-        # 検出した四角形を重ね描き
-        flat = []
-        for x, y in quad.points:
-            flat += [x * PREVIEW_ZOOM, y * PREVIEW_ZOOM]
-        canvas.create_polygon(*flat, outline=theme.ACCENT, fill="", width=3)
-        for x, y in quad.points:
-            cx = x * PREVIEW_ZOOM
-            cy = y * PREVIEW_ZOOM
-            canvas.create_oval(cx - 5, cy - 5, cx + 5, cy + 5,
-                               fill=theme.ACCENT, outline="")
+        # 検出した四角形をすべて重ね描きし、番号と音名を添える
+        names = scale_note_names(photo)
+        for i, quad in enumerate(quads):
+            flat = []
+            for x, y in quad.points:
+                flat += [x * PREVIEW_ZOOM, y * PREVIEW_ZOOM]
+            canvas.create_polygon(*flat, outline=theme.ACCENT, fill="", width=3)
+            cx = sum(p[0] for p in quad.points) * PREVIEW_ZOOM // 4
+            cy = sum(p[1] for p in quad.points) * PREVIEW_ZOOM // 4
+            from ..core.music import NOTE_NAMES
+            note = NOTE_NAMES[photo.pitch_classes[i]]
+            canvas.create_text(cx, cy, text=f"{i + 1}:{note}",
+                               font=theme.FONT_BOLD, fill=theme.PLAYHEAD)
 
-        tk.Label(win, text=describe(harmony), font=theme.FONT, justify="left",
+        tk.Label(win, text=describe(photo), font=theme.FONT, justify="left",
                  bg=theme.BG, fg=theme.TEXT).pack(padx=14, pady=6, anchor="w")
 
         bar = tk.Frame(win, bg=theme.BG)
         bar.pack(pady=(2, 12))
-        apply_button = app._button(bar, "♪ この和音で作曲", self._apply, accent=True)
-        apply_button.pack(side="left", padx=6)
+        app._button(bar, "♪ この音階で自動作成", self._apply_and_generate,
+                    accent=True).pack(side="left", padx=6)
+        app._button(bar, "🎼 音階だけ取り込む", self._apply_only).pack(side="left", padx=6)
         app._button(bar, "閉じる", win.destroy).pack(side="left", padx=6)
-        win.bind("<Return>", lambda e: self._apply())
+        win.bind("<Return>", lambda e: self._apply_and_generate())
         win.bind("<Escape>", lambda e: win.destroy())
 
-    def _apply(self):
+    def _apply_and_generate(self):
         self.win.destroy()
-        self.app.apply_photo_harmony(self.harmony)
+        self.app.apply_photo_scale(self.photo_scale, generate=True)
+
+    def _apply_only(self):
+        self.win.destroy()
+        self.app.apply_photo_scale(self.photo_scale, generate=False)

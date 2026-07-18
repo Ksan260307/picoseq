@@ -14,7 +14,7 @@ from picoseq.core.renderer import render_song
 from picoseq.core.serialize import dumps, loads
 from picoseq.core.wavio import wav_bytes
 
-GOLDEN_SONG_CRC = 1678626668
+GOLDEN_SONG_CRC = 3632967442
 
 
 def _build_song_project():
@@ -70,32 +70,39 @@ class TestFullPipeline(unittest.TestCase):
         self.assertNotEqual(pcm, b"\x00" * len(pcm))
 
     def test_photo_to_song_pipeline(self):
-        """写真 (合成) → 四角形 → 和音 → 自動作成 → 保存往復。"""
-        from picoseq.vision.harmony import harmony_from_quad
-        from picoseq.vision.quad import detect_quad
+        """写真 (合成・四角形 2 個) → 音階抽出 → 自動作成 → 保存往復。"""
+        from picoseq.vision.harmony import photo_scale_from_quads
+        from picoseq.vision.quad import detect_quads
         from tests._vision_util import draw_quad_grid
 
-        grid = draw_quad_grid(160, 120, [(30, 20), (130, 20), (130, 90), (30, 90)])
-        quad = detect_quad(grid)
-        self.assertIsNotNone(quad)
-        harmony = harmony_from_quad(quad)
+        grid = draw_quad_grid(160, 120, [(15, 20), (70, 20), (70, 90), (15, 90)])
+        for y in range(30, 81):
+            for x in range(100, 141):
+                grid[y][x] = 230  # 2 つ目の四角形
+        quads = detect_quads(grid)
+        self.assertEqual(len(quads), 2)
+        photo = photo_scale_from_quads(quads)
 
-        p = new_project()
-        p = actions.set_key(p, harmony.key)
-        p = actions.set_scale(p, harmony.scale)
-        p = actions.set_bpm(p, harmony.bpm)
-        p = actions.set_seed(p, harmony.seed)
-        p = actions.set_progression(p, harmony.progression)
+        p = actions.set_custom_scale(new_project(), photo.key, photo.intervals,
+                                     photo.bpm, photo.seed)
         p = actions.generate_phrase(p)
 
         self.assertGreater(count_notes(p.phrase), 0)
+        self.assertEqual(p.scale, "photo")
         restored = loads(dumps(p))
         self.assertEqual(restored, p)
-        self.assertEqual(restored.progression, harmony.progression)
+        self.assertEqual(restored.custom_scale, p.custom_scale)
 
-        # 同じ写真からは同じ曲 (入力の権威化 → 決定論)
+        # 同じ写真からは同じ曲 (取り込んだ値が記録されるため再現できる)
         p2 = actions.generate_phrase(p)
         self.assertEqual(p.phrase, p2.phrase)
+
+        # メロディはフォト音階の音だけを使う
+        from picoseq.core.music import in_scale
+        from picoseq.core.phrase import active_notes
+        for _, note in active_notes(p.phrase):
+            if note.wave == 0:
+                self.assertTrue(in_scale(note.pitch, p.key, "photo", p.custom_scale))
 
     def test_undo_snapshot_roundtrip(self):
         """スナップショット (直列化) 経由の復元が編集で使える形で往復する。"""

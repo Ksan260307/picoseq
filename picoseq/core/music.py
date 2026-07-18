@@ -34,6 +34,28 @@ SCALES = {
 }
 SCALE_IDS = tuple(SCALES)
 DEFAULT_SCALE = "minor"
+PHOTO_SCALE = "photo"  # 写真から抽出したカスタム音階 (プロジェクトごとに音の並びが違う)
+
+
+def default_progression(count: int) -> tuple:
+    """音数 count の音階に合わせた無難な既定コード進行。"""
+    return (0, min(3, count - 1), min(1, count - 1), min(4, count - 1))
+
+
+def get_scale(scale_id: str, custom=None) -> dict:
+    """音階定義 (label / intervals / progression) を返す。
+
+    scale_id が "photo" のときは、プロジェクトが持つカスタム音程列 custom を使う。
+    """
+    if scale_id == PHOTO_SCALE:
+        if not custom:
+            raise ValueError("フォト音階が設定されていません。")
+        return {
+            "label": "📷 フォト音階",
+            "intervals": tuple(custom),
+            "progression": default_progression(len(custom)),
+        }
+    return SCALES[scale_id]
 
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
@@ -71,9 +93,10 @@ def pitch_millihz(pitch: int) -> int:
     return PITCH_MILLIHZ[pitch - PITCH_MIN]
 
 
-def scale_pitches(key: int, scale_id: str, lo: int = PITCH_MIN, hi: int = PITCH_MAX) -> list:
+def scale_pitches(key: int, scale_id: str, lo: int = PITCH_MIN, hi: int = PITCH_MAX,
+                  custom=None) -> list:
     """キーとスケールに属する音を昇順で返す。"""
-    intervals = SCALES[scale_id]["intervals"]
+    intervals = get_scale(scale_id, custom)["intervals"]
     root = root_note(key)
     out = []
     for octave in range(-2, 4):
@@ -84,18 +107,18 @@ def scale_pitches(key: int, scale_id: str, lo: int = PITCH_MIN, hi: int = PITCH_
     return sorted(out)
 
 
-def in_scale(pitch: int, key: int, scale_id: str) -> bool:
+def in_scale(pitch: int, key: int, scale_id: str, custom=None) -> bool:
     """その音がスケールに属するか。"""
-    return (pitch - root_note(key)) % 12 in SCALES[scale_id]["intervals"]
+    return (pitch - root_note(key)) % 12 in get_scale(scale_id, custom)["intervals"]
 
 
 def chord_at(key: int, scale_id: str, step: int, beats: int,
-             progression=None) -> Chord:
+             progression=None, custom=None) -> Chord:
     """そのステップで鳴っているコード (根音・3度・5度)。半小節ごとに進行する。
 
     progression を渡すとスケール既定の進行の代わりに使う (度数の列)。
     """
-    scale = SCALES[scale_id]
+    scale = get_scale(scale_id, custom)
     intervals = scale["intervals"]
     if progression is None:
         progression = scale["progression"]

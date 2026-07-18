@@ -1,4 +1,4 @@
-"""状態遷移 — すべて純粋関数。Project を受け取り、新しい Project を返す。
+"""操作 (アクション) — すべて純粋関数。Project を受け取り、新しい Project を返す。
 
 副作用・I/O・実時間・暗黙の乱数を一切持たない。
 変化が無い場合は同じオブジェクトをそのまま返す (呼び出し側の無変更検出用)。
@@ -21,9 +21,10 @@ from .constants import (
     PROGRESSION_MAX_LEN,
     SEED_MAX,
     SEED_MIN,
+    SOUND_SETS,
     clamp,
 )
-from .music import SCALES
+from .music import PHOTO_SCALE, SCALES, get_scale
 from .project import Pattern, Project, steps_of, update
 
 
@@ -52,24 +53,52 @@ def set_key(project: Project, key: int) -> Project:
 
 
 def set_scale(project: Project, scale_id: str) -> Project:
-    """スケールを変える。カスタム進行は度数の意味が変わるためリセットする。"""
-    if scale_id not in SCALES:
-        raise ValueError(f"未知のスケールです: {scale_id}")
+    """音階を変える。カスタム進行は度数の意味が変わるためリセットする。
+
+    "photo" (フォト音階) は写真から取り込み済みのときだけ選べる。
+    """
+    if scale_id == PHOTO_SCALE:
+        if project.custom_scale is None:
+            raise ValueError("フォト音階がまだありません。📷 写真から取り込んでください。")
+    elif scale_id not in SCALES:
+        raise ValueError(f"未知の音階です: {scale_id}")
     if scale_id == project.scale:
         return project
     return update(project, scale=scale_id, progression=None)
+
+
+def set_custom_scale(project: Project, key: int, intervals, bpm: int, seed: int) -> Project:
+    """写真から抽出した音階を登録し、その音階へ切り替える。
+
+    intervals は 0 を含む半音の列 (例: (0, 3, 5, 8, 10))。
+    キー・テンポ・シードも写真由来の値として一緒に記録する。
+    """
+    degrees = tuple(sorted(set(int(v) % 12 for v in intervals)))
+    if 0 not in degrees:
+        degrees = tuple(sorted((0,) + degrees))
+    if len(degrees) < 3:
+        raise ValueError(f"フォト音階には 3 音以上必要です: {degrees}")
+    return update(
+        project,
+        custom_scale=degrees,
+        scale=PHOTO_SCALE,
+        key=clamp(int(key), 0, 11),
+        bpm=clamp(int(bpm), BPM_MIN, BPM_MAX),
+        seed=clamp(int(seed), SEED_MIN, SEED_MAX),
+        progression=None,
+    )
 
 
 def set_progression(project: Project, progression) -> Project:
     """カスタムコード進行を設定する。None でスケール既定に戻す。"""
     if progression is not None:
         degrees = tuple(int(d) for d in progression)
-        n = len(SCALES[project.scale]["intervals"])
+        n = len(get_scale(project.scale, project.custom_scale)["intervals"])
         if not (1 <= len(degrees) <= PROGRESSION_MAX_LEN):
             raise ValueError(f"進行の長さが範囲外です: {len(degrees)}")
         for degree in degrees:
             if not (0 <= degree < n):
-                raise ValueError(f"度数が範囲外です: {degree} (スケール音数 {n})")
+                raise ValueError(f"度数が範囲外です: {degree} (音階の音数 {n})")
         progression = degrees
     if progression == project.progression:
         return project
@@ -81,6 +110,15 @@ def set_seed(project: Project, seed: int) -> Project:
     if seed == project.seed:
         return project
     return update(project, seed=seed)
+
+
+def set_sound(project: Project, sound: str) -> Project:
+    """音色セットを変える (retro8 / warm16 / clear32)。"""
+    if sound not in SOUND_SETS:
+        raise ValueError(f"未知の音色セットです: {sound}")
+    if sound == project.sound:
+        return project
+    return update(project, sound=sound)
 
 
 # ---- パート設定 ----
@@ -158,9 +196,9 @@ def clear_phrase(project: Project) -> Project:
 
 
 def generate_phrase(project: Project) -> Project:
-    """現在の設定 (拍子・キー・スケール・シード・進行) からフレーズを自動作成する。"""
+    """現在の設定 (拍子・キー・音階・シード・進行) からフレーズを自動作成する。"""
     buffer = compose(project.beats, project.key, project.scale, project.seed,
-                     project.progression)
+                     project.progression, project.custom_scale)
     return update(project, phrase=buffer)
 
 
@@ -174,6 +212,26 @@ def arrange_accompaniment(project: Project) -> Project:
     if progression is None:
         return project
     return update(project, phrase=buffer, progression=progression)
+
+
+def generate_song(project: Project) -> Project:
+    """1 曲ぶんを自動作成する。
+
+    パターン 1〜4 (イントロ / Aメロ / Bメロ / アウトロ) を作って
+    ソング構成に並べる。パターン 5〜8 は温存する。
+    編集画面には Aメロを開く。
+    """
+    from .songwriter import write_song
+    buffers, layout = write_song(project.beats, project.key, project.scale,
+                                 project.seed, project.progression,
+                                 project.custom_scale)
+    patterns = [Pattern(used=True, notes=buf) for buf in buffers]
+    patterns += list(project.patterns[len(buffers):])
+    song = list(song_ops.EMPTY_SONG)
+    for block, pattern_id in enumerate(layout):
+        song[song_ops.cell_index(0, block)] = pattern_id
+    return update(project, patterns=tuple(patterns), song=tuple(song),
+                  phrase=buffers[1])
 
 
 # ---- パターン (お気に入り) ----

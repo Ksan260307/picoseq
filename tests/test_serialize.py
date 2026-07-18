@@ -39,7 +39,7 @@ class TestRoundtrip(unittest.TestCase):
         self.assertEqual(loads(dumps(p)), p)
 
     def test_replay_identity_fields(self):
-        """保存データは必ずアプリ ID とスキーマ版を持つ (再生同一性)。"""
+        """保存データは必ずアプリ ID と形式バージョンを持つ。"""
         data = to_jsonable(new_project())
         self.assertEqual(data["app"], APP_ID)
         self.assertEqual(data["schema"], SCHEMA_VERSION)
@@ -76,6 +76,57 @@ class TestProgressionField(unittest.TestCase):
         p = actions.set_progression(new_project(), (0, 5, 2, 6))  # minor で有効
         data = to_jsonable(p)
         data["scale"] = "japanese"  # 5 音 → 度数 5, 6 が範囲外になる
+        self.assertIsNone(loads(json.dumps(data)).progression)
+
+
+class TestCustomScaleField(unittest.TestCase):
+    """schema v3 で追加されたフォト音階の入出力。"""
+
+    def _photo_project(self):
+        return actions.set_custom_scale(new_project(), key=5,
+                                        intervals=(0, 3, 5, 8, 10),
+                                        bpm=140, seed=99)
+
+    def test_roundtrip(self):
+        p = self._photo_project()
+        restored = loads(dumps(p))
+        self.assertEqual(restored.custom_scale, (0, 3, 5, 8, 10))
+        self.assertEqual(restored.scale, "photo")
+        self.assertEqual(restored, p)
+
+    def test_schema2_data_loads_without_custom_scale(self):
+        """v2 のデータ (custom_scale 無し) も読める (後方互換)。"""
+        data = to_jsonable(new_project())
+        data["schema"] = 2
+        del data["custom_scale"]
+        p = loads(json.dumps(data))
+        self.assertIsNone(p.custom_scale)
+
+    def test_photo_scale_without_intervals_falls_back(self):
+        """scale="photo" なのに音程列が壊れていたら既定の曲調へ。"""
+        data = to_jsonable(self._photo_project())
+        data["custom_scale"] = None
+        p = loads(json.dumps(data))
+        self.assertEqual(p.scale, "minor")
+
+    def test_invalid_custom_scale_dropped(self):
+        base = to_jsonable(self._photo_project())
+        for bad in ([0, 1], [1, 5, 9], [0, "x", 5], [0, 3, 99], "035", [True, 0, 3]):
+            with self.subTest(bad=bad):
+                data = dict(base)
+                data["custom_scale"] = bad
+                p = loads(json.dumps(data))
+                self.assertIsNone(p.custom_scale)
+                self.assertEqual(p.scale, "minor")
+
+    def test_progression_validated_against_custom_scale(self):
+        p = self._photo_project()  # 5 音
+        p = actions.set_progression(p, (0, 4, 2, 1))
+        restored = loads(dumps(p))
+        self.assertEqual(restored.progression, (0, 4, 2, 1))
+        # 音階を縮めると範囲外の度数は捨てられる
+        data = to_jsonable(p)
+        data["custom_scale"] = [0, 4, 7]
         self.assertIsNone(loads(json.dumps(data)).progression)
 
 

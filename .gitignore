@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .picoseq/
 *.wav
+build/
+dist/
+*.spec

@@ -1,12 +1,24 @@
 """固定小数点シンセ — 整数演算のみでサンプル列を生成する。
 
-浮動小数点を使わないため、同じ入力からはどの環境でもビット等価の音が出る。
+浮動小数点を使わないため、同じ入力からはどの環境でも完全一致の音が出る。
 - 位相: 32bit アキュムレータ
 - 音量: Q15 (0..32767)
-- ノイズ: 15bit LFSR (ファミコン方式のタップ)
+- ノイズ: 15bit LFSR
+
+音色セット (sound):
+  retro8  … 角の立ったピコピコ音 (既定。従来とビット単位で同じ音)
+  warm16  … 立ち上がりが柔らかく、こもった丸い音
+  clear32 … 1 オクターブ上を薄く重ねた、明るくきらびやかな音
 """
 
-from .constants import SAMPLE_RATE, WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRIANGLE
+from .constants import (
+    DEFAULT_SOUND,
+    SAMPLE_RATE,
+    WAVE_NOISE,
+    WAVE_PULSE,
+    WAVE_SAW,
+    WAVE_TRIANGLE,
+)
 from .music import pitch_millihz
 
 PHASE_MASK = 0xFFFFFFFF
@@ -44,7 +56,8 @@ def voice_samples(dur_samples: int, gate: int) -> int:
     return dur_samples * (15 * gate + 100) // 1000
 
 
-def envelope_segments(wave: int, total: int, rate: int) -> list:
+def envelope_segments(wave: int, total: int, rate: int,
+                      sound: str = DEFAULT_SOUND) -> list:
     """(サンプル数, 目標レベル Q15) の列。立ち上がりと減衰の折れ線。"""
     peak = PEAKS[wave]
     if wave == WAVE_TRIANGLE:
@@ -53,38 +66,83 @@ def envelope_segments(wave: int, total: int, rate: int) -> list:
         attack = rate * 5 // 1000
     else:
         attack = rate * 10 // 1000
+    if sound == "warm16":
+        attack *= 3  # 柔らかい立ち上がり
     attack = min(attack, max(1, total // 4))
     rest = total - attack
 
     if wave in (WAVE_PULSE, WAVE_SAW):
-        # 早めに落としてから尾を引く 2 段減衰
+        # 早めに落としてから尾を引く 2 段減衰 (warm16/clear32 は減衰を浅く)
+        sustain = 45 if sound == "retro8" else 60
         first = rest // 4
-        return [(attack, peak), (first, peak * 45 // 100), (rest - first, 0)]
+        return [(attack, peak), (first, peak * sustain // 100), (rest - first, 0)]
     return [(attack, peak), (rest, 0)]
 
 
+# 音色セットごとのフィルタ開き具合 (三角波 / ノコギリ波)
+_TRI_CUTOFF = {"retro8": (300, 30), "warm16": (300, 30), "clear32": (600, 60)}
+_SAW_CUTOFF = {"retro8": (500, 50), "warm16": (300, 25), "clear32": (900, 80)}
+
+
 def render_voice(wave: int, pitch: int, dur_samples: int, tone: int, gate: int,
-                 rate: int = SAMPLE_RATE) -> list:
-    """1 音符ぶんのサンプル列 (int, ±ピーク以内) を返す。純粋関数。"""
+                 rate: int = SAMPLE_RATE, sound: str = DEFAULT_SOUND) -> list:
+    """1 音符ぶんのサンプル列を返す。純粋関数。sound で音の性格が変わる。"""
     total = voice_samples(dur_samples, gate)
     if total <= 0:
         return []
 
-    if wave == WAVE_NOISE:
-        raw = _render_noise(total, tone, rate)
-    else:
-        millihz = pitch_millihz(pitch)
-        if wave == WAVE_TRIANGLE:
-            millihz //= 2  # ベースは 1 オクターブ下で鳴らす
-        inc = phase_increment(millihz, rate)
-        if wave == WAVE_PULSE:
-            raw = _render_pulse(total, inc, tone)
-        elif wave == WAVE_TRIANGLE:
-            raw = _render_filtered(total, inc, _oscillate_triangle, 300 + tone * 30, rate)
-        else:
-            raw = _render_filtered(total, inc, _oscillate_saw, 500 + tone * 50, rate)
+    raw = _render_raw(wave, pitch, total, tone, rate, sound)
+    voice = _apply_envelope(raw, envelope_segments(wave, total, rate, sound))
+    if sound == "warm16":
+        voice = _soften(voice, 1800 + tone * 40, rate)  # 全体を丸くする仕上げ
+    return voice
 
-    return _apply_envelope(raw, envelope_segments(wave, total, rate))
+
+def _render_raw(wave, pitch, total, tone, rate, sound):
+    """音色セットに応じた生波形。retro8 は従来と同一の経路。"""
+    if wave == WAVE_NOISE:
+        if sound == "warm16":
+            tone = min(tone, 25)          # こもった打楽器
+        elif sound == "clear32":
+            tone = min(100, tone + 15)    # 明るめの打楽器
+        return _render_noise(total, tone, rate)
+
+    millihz = pitch_millihz(pitch)
+    if wave == WAVE_TRIANGLE:
+        millihz //= 2  # ベースは 1 オクターブ下で鳴らす
+    inc = phase_increment(millihz, rate)
+
+    if wave == WAVE_PULSE:
+        duty_tone = 50 + tone // 2 if sound == "warm16" else tone
+        raw = _render_pulse(total, inc, duty_tone)
+    elif wave == WAVE_TRIANGLE:
+        base, slope = _TRI_CUTOFF[sound]
+        raw = _render_filtered(total, inc, _oscillate_triangle, base + tone * slope, rate)
+    else:
+        base, slope = _SAW_CUTOFF[sound]
+        raw = _render_filtered(total, inc, _oscillate_saw, base + tone * slope, rate)
+
+    if sound == "clear32" and wave in (WAVE_PULSE, WAVE_SAW):
+        # 1 オクターブ上を約 30% で重ね、きらめきを足す
+        inc2 = phase_increment(millihz * 2, rate)
+        if wave == WAVE_PULSE:
+            shadow = _render_pulse(total, inc2, tone)
+        else:
+            base, slope = _SAW_CUTOFF[sound]
+            shadow = _render_filtered(total, inc2, _oscillate_saw, base + tone * slope, rate)
+        raw = [a + (b * 77 >> 8) for a, b in zip(raw, shadow)]
+    return raw
+
+
+def _soften(voice: list, cutoff_hz: int, rate: int) -> list:
+    """仕上げの一次ローパス (warm16 用)。"""
+    alpha = alpha_q15(cutoff_hz, rate)
+    y = 0
+    out = []
+    for v in voice:
+        y += (v - y) * alpha >> 15
+        out.append(y)
+    return out
 
 
 def _render_pulse(total: int, inc: int, tone: int) -> list:

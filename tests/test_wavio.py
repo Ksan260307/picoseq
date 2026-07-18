@@ -1,4 +1,4 @@
-"""WAV 符号化のテスト — 標準ライブラリ wave での照合 (基準実装照合)。"""
+"""WAV 符号化のテスト — 標準ライブラリ wave での照合。"""
 
 import io
 import struct

@@ -68,10 +68,10 @@ class RollView:
         for row in range(ROWS):
             pitch = PITCH_MAX - row
             y = row * CELL_H
-            # 行の地色: ルート音 > スケール内 > その他
+            # 行の地色: 基準の音 > 音階に入っている音 > その他
             if pitch % 12 == project.key % 12:
                 row_bg = theme.ROW_ROOT
-            elif in_scale(pitch, project.key, project.scale):
+            elif in_scale(pitch, project.key, project.scale, project.custom_scale):
                 row_bg = theme.ROW_SCALE
             else:
                 row_bg = theme.GRID_BG

@@ -88,35 +88,66 @@ class TestInvariants(unittest.TestCase):
 
 
 class TestStyles(unittest.TestCase):
-    def test_battle_bass_is_driving(self):
-        """ボス戦のベースは偶数ステップを刻む。"""
+    def test_battle_is_dense(self):
+        """ボス戦は音数が多く、勢いのある伴奏になる。"""
         buffer = compose(4, 0, "battle", 12)
-        bass_steps = sorted(note.step for _, note in active_notes(buffer)
-                            if note.wave == WAVE_TRIANGLE)
-        self.assertEqual(bass_steps, [s for s in range(32) if s % 2 == 0])
-
-    def test_battle_backing_is_arpeggio(self):
-        """ボス戦のサブは全ステップのアルペジオ。"""
-        buffer = compose(4, 0, "battle", 12)
-        backing = [note for _, note in active_notes(buffer) if note.wave == WAVE_SAW]
-        self.assertEqual(len(backing), 32)
+        bass = [n for _, n in active_notes(buffer) if n.wave == WAVE_TRIANGLE]
+        backing = [n for _, n in active_notes(buffer) if n.wave == WAVE_SAW]
+        self.assertGreaterEqual(len(bass), 12)
+        self.assertGreaterEqual(len(backing), 12)
 
     def test_japanese_drum_anchor(self):
-        """和風のリズムは小節頭に長い一打を置く。"""
-        buffer = compose(4, 0, "japanese", 12)
-        drums = {note.step: note for _, note in active_notes(buffer)
-                 if note.wave == WAVE_NOISE}
-        self.assertIn(0, drums)
-        self.assertEqual(drums[0].dur, 4)
-        self.assertIn(14, drums)  # 小節末 (16-2)
+        """和風のリズムは小節頭に長い一打を置く (スタイル 3/5 以外)。"""
+        # japanese の太鼓型を確実に引くシードを探す
+        for seed in range(1, 60):
+            drums = {note.step: note for _, note in
+                     active_notes(compose(4, 0, "japanese", seed))
+                     if note.wave == WAVE_NOISE}
+            if drums.get(0) is not None and drums[0].dur == 4:
+                self.assertIn(14, drums)  # 小節末 (16-2)
+                return
+        self.fail("和風の太鼓型が見つからない")
 
-    def test_straight_beat_has_downbeats(self):
-        """通常拍子のリズムは小節頭と 4 分刻みを打つ。"""
-        buffer = compose(4, 0, "minor", 12)
-        drum_steps = {note.step for _, note in active_notes(buffer)
-                      if note.wave == WAVE_NOISE}
-        for step in (0, 4, 8, 12, 16, 20, 24, 28):
-            self.assertIn(step, drum_steps)
+    def test_downbeat_always_present(self):
+        """通常拍子のリズムは、どのスタイル・どの曲調でも小節頭を必ず打つ。"""
+        for scale in ("major", "minor", "battle"):
+            for seed in (1, 12, 55, 300, 7777):
+                with self.subTest(scale=scale, seed=seed):
+                    drum_steps = {note.step for _, note in
+                                  active_notes(compose(4, 0, scale, seed))
+                                  if note.wave == WAVE_NOISE}
+                    self.assertIn(0, drum_steps)
+                    self.assertIn(16, drum_steps)
+
+    def test_huge_style_variety(self):
+        """大量のシード値がすべて異なる曲になる (バリエーションの豊富さ)。"""
+        results = {compose(4, 0, "minor", seed) for seed in range(1, 121)}
+        self.assertGreaterEqual(len(results), 118)  # ほぼ全部が別の曲
+
+    def test_variety_in_every_scale(self):
+        for scale in ("major", "minor", "japanese", "battle"):
+            with self.subTest(scale=scale):
+                results = {compose(4, 0, scale, seed) for seed in range(1, 41)}
+                self.assertGreaterEqual(len(results), 38)
+
+    def test_style_counts_are_reachable(self):
+        """各パートのすべてのスタイルが、どこかのシードで実際に選ばれる。"""
+        from picoseq.core.composer import (
+            BACKING_STYLES,
+            BASS_STYLES,
+            DRUM_STYLES,
+            MELODY_RHYTHMS,
+            MOTIF_MODES,
+        )
+        from picoseq.core.prng import Rng
+        seen = [set(), set(), set(), set(), set()]
+        counts = (BASS_STYLES, BACKING_STYLES, DRUM_STYLES, MELODY_RHYTHMS, MOTIF_MODES)
+        for seed in range(1, 400):
+            rng = Rng(seed)
+            for i, count in enumerate(counts):
+                seen[i].add(rng.next_int(count))
+        for chosen, count in zip(seen, counts):
+            self.assertEqual(len(chosen), count)
 
 
 if __name__ == "__main__":

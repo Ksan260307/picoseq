@@ -1,4 +1,4 @@
-"""状態遷移 (アクション) のテスト — 純粋性・範囲収め・連鎖の整合。"""
+"""操作 (アクション) のテスト — 純粋性・範囲収め・連鎖の整合。"""
 
 import unittest
 
@@ -66,10 +66,44 @@ class TestSetters(unittest.TestCase):
             actions.set_progression(self.p, tuple(range(6)) * 3)  # 長すぎ
 
     def test_set_scale_resets_progression(self):
-        """スケールが変われば度数の意味が変わるため、進行は既定へ戻す。"""
+        """音階が変われば度数の意味が変わるため、進行は既定へ戻す。"""
         p = actions.set_progression(self.p, (0, 5, 2, 6))
         p = actions.set_scale(p, "japanese")
         self.assertIsNone(p.progression)
+
+    def test_photo_scale_requires_custom(self):
+        with self.assertRaises(ValueError):
+            actions.set_scale(self.p, "photo")  # まだフォト音階が無い
+
+    def test_set_custom_scale(self):
+        p = actions.set_custom_scale(self.p, key=5, intervals=(3, 0, 10, 3),
+                                     bpm=150, seed=77)
+        self.assertEqual(p.scale, "photo")
+        self.assertEqual(p.custom_scale, (0, 3, 10))  # 整列・重複除去
+        self.assertEqual((p.key, p.bpm, p.seed), (5, 150, 77))
+        # 別の曲調へ移ってもフォト音階は残っていて、戻れる
+        p = actions.set_scale(p, "major")
+        self.assertEqual(p.custom_scale, (0, 3, 10))
+        p = actions.set_scale(p, "photo")
+        self.assertEqual(p.scale, "photo")
+
+    def test_set_custom_scale_adds_root(self):
+        p = actions.set_custom_scale(self.p, 0, (4, 7, 11), 120, 1)
+        self.assertEqual(p.custom_scale[0], 0)  # 0 (キー自身) を必ず含む
+
+    def test_set_custom_scale_requires_three(self):
+        with self.assertRaises(ValueError):
+            actions.set_custom_scale(self.p, 0, (0, 5), 120, 1)
+
+    def test_generate_with_photo_scale(self):
+        p = actions.set_custom_scale(self.p, 0, (0, 2, 5, 7, 9), 120, 3)
+        p = actions.generate_phrase(p)
+        from picoseq.core.music import in_scale
+        from picoseq.core.phrase import active_notes
+        melody = [n for _, n in active_notes(p.phrase) if n.wave == 0]
+        self.assertTrue(melody)
+        for note in melody:
+            self.assertTrue(in_scale(note.pitch, 0, "photo", p.custom_scale))
 
     def test_part_params(self):
         p = actions.set_part_tone(self.p, 2, 999)

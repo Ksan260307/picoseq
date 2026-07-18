@@ -14,7 +14,7 @@
 
 from .composer import accompany_notes
 from .constants import WAVE_PULSE, steps_per_phrase
-from .music import SCALES, chord_at
+from .music import chord_at, get_scale
 from .note import Note
 from .phrase import active_notes, build_phrase
 from .project import Project, steps_of
@@ -54,7 +54,7 @@ def infer_progression(project: Project) -> tuple:
     steps = steps_per_phrase(beats)
     half = half_measure(beats)
     window_count = max(1, steps // half)
-    n = len(SCALES[project.scale]["intervals"])
+    n = len(get_scale(project.scale, project.custom_scale)["intervals"])
     melody = melody_notes(project)
 
     degrees = []
@@ -68,7 +68,8 @@ def infer_progression(project: Project) -> tuple:
         best_degree = 0
         best_score = None
         for d in range(n):
-            chord = chord_at(project.key, project.scale, lo, beats, (d,))
+            chord = chord_at(project.key, project.scale, lo, beats, (d,),
+                             project.custom_scale)
             root_pc = chord.root % 12
             third_pc = chord.third % 12
             fifth_pc = chord.fifth % 12
@@ -102,7 +103,7 @@ def arrange(project: Project):
 
     progression = infer_progression(project)
     accompaniment = accompany_notes(project.beats, project.key, project.scale,
-                                    project.seed, progression)
+                                    project.seed, progression, project.custom_scale)
     # メロディを先頭に置く (盤面の内容を優先して残す)
     merged = list(melody) + list(accompaniment)
     return build_phrase(merged), progression

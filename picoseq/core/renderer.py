@@ -1,18 +1,18 @@
 """レンダラ — イベント列から PCM を合成する純粋関数。
 
 ミキシングは幅広整数の加算で行い、最後に 1 回だけクリップする。
-整数加算は結合的・可換なので、加算順序によらず同一の結果になる (順序独立性)。
+整数加算は足す順番を変えても結果が変わらないため、常に同じ音になる。
 
 高速化 (結果は不変):
 - 音声キャッシュ: 同じ (波形,音高,長さ,音色,ゲート) の音は一度だけ合成して使い回す。
   ソングは同じパターンを何度も鳴らすので効果が大きい。
 - numpy があればミックスを配列演算で行う。整数加算なので純 Python と**ビット等価**。
-  無ければ純 Python 経路で同じ結果を出す (可搬性・基準実装)。
+  無ければ純 Python 経路で同じ結果を出す (どこでも動くリファレンス実装)。
 """
 
 from array import array
 
-from .constants import SAMPLE_RATE
+from .constants import DEFAULT_SOUND, SAMPLE_RATE
 from .project import Project
 from .schedule import (
     phrase_events,
@@ -38,12 +38,12 @@ def clear_cache():
     _voice_cache.clear()
 
 
-def _cached_voice(wave, pitch, dur_samples, tone, gate, rate):
+def _cached_voice(wave, pitch, dur_samples, tone, gate, rate, sound):
     """音声を合成またはキャッシュから返す。純粋関数の記憶化。"""
-    key = (wave, pitch, dur_samples, tone, gate, rate)
+    key = (wave, pitch, dur_samples, tone, gate, rate, sound)
     voice = _voice_cache.get(key)
     if voice is None:
-        voice = render_voice(wave, pitch, dur_samples, tone, gate, rate)
+        voice = render_voice(wave, pitch, dur_samples, tone, gate, rate, sound)
         if len(_voice_cache) >= _VOICE_CACHE_LIMIT:
             _voice_cache.clear()
         _voice_cache[key] = voice
@@ -51,7 +51,8 @@ def _cached_voice(wave, pitch, dur_samples, tone, gate, rate):
 
 
 def render_events(events, bpm: int, parts: tuple, total_ticks: int,
-                  rate: int = SAMPLE_RATE, wrap: bool = False):
+                  rate: int = SAMPLE_RATE, wrap: bool = False,
+                  sound: str = DEFAULT_SOUND):
     """イベント列をミックスして幅広整数のサンプル列 (list または numpy 配列) を返す。
 
     wrap=False: 末尾に余韻ぶんの尻尾を付ける (書き出し用)。
@@ -59,8 +60,8 @@ def render_events(events, bpm: int, parts: tuple, total_ticks: int,
                 (ループ再生用。継ぎ目が途切れない)。
     """
     if _np is not None:
-        return _render_events_numpy(events, bpm, parts, total_ticks, rate, wrap)
-    return _render_events_python(events, bpm, parts, total_ticks, rate, wrap)
+        return _render_events_numpy(events, bpm, parts, total_ticks, rate, wrap, sound)
+    return _render_events_python(events, bpm, parts, total_ticks, rate, wrap, sound)
 
 
 def _mix_extent(total_ticks, spt, wrap, rate):
@@ -69,15 +70,16 @@ def _mix_extent(total_ticks, spt, wrap, rate):
     return loop_len, total
 
 
-def _render_events_python(events, bpm, parts, total_ticks, rate, wrap):
-    """基準実装 (純 Python)。numpy 経路はこれとビット等価でなければならない。"""
+def _render_events_python(events, bpm, parts, total_ticks, rate, wrap,
+                          sound=DEFAULT_SOUND):
+    """リファレンス実装 (純 Python)。numpy 経路はこれと完全一致でなければならない。"""
     spt = samples_per_tick(bpm, rate)
     loop_len, total = _mix_extent(total_ticks, spt, wrap, rate)
     mix = [0] * total
     for event in events:
         part = parts[event.wave]
         voice = _cached_voice(event.wave, event.pitch, event.dur * spt,
-                              part.tone, part.gate, rate)
+                              part.tone, part.gate, rate, sound)
         start = event.tick * spt
         if wrap:
             for i, value in enumerate(voice):
@@ -89,15 +91,16 @@ def _render_events_python(events, bpm, parts, total_ticks, rate, wrap):
     return mix
 
 
-def _render_events_numpy(events, bpm, parts, total_ticks, rate, wrap):
-    """numpy によるミックス。int32 加算は純 Python と同じ結果になる。"""
+def _render_events_numpy(events, bpm, parts, total_ticks, rate, wrap,
+                         sound=DEFAULT_SOUND):
+    """numpy によるミックス。整数加算なので純 Python と同じ結果になる。"""
     spt = samples_per_tick(bpm, rate)
     loop_len, total = _mix_extent(total_ticks, spt, wrap, rate)
     mix = _np.zeros(total, dtype=_np.int64)
     for event in events:
         part = parts[event.wave]
         voice = _cached_voice(event.wave, event.pitch, event.dur * spt,
-                              part.tone, part.gate, rate)
+                              part.tone, part.gate, rate, sound)
         if not voice:
             continue
         varr = _np.asarray(voice, dtype=_np.int64)
@@ -135,33 +138,33 @@ def clip_to_pcm(mix) -> bytes:
 def render_phrase(project: Project, rate: int = SAMPLE_RATE) -> bytes:
     """現在のフレーズを 16bit PCM にする。"""
     mix = render_events(phrase_events(project), project.bpm, project.parts,
-                        phrase_ticks(project), rate)
+                        phrase_ticks(project), rate, sound=project.sound)
     return clip_to_pcm(mix)
 
 
 def render_song(project: Project, rate: int = SAMPLE_RATE) -> bytes:
     """ソング構成全体を 16bit PCM にする。"""
     mix = render_events(song_events(project), project.bpm, project.parts,
-                        song_ticks(project), rate)
+                        song_ticks(project), rate, sound=project.sound)
     return clip_to_pcm(mix)
 
 
 def render_phrase_loop(project: Project, rate: int = SAMPLE_RATE) -> bytes:
     """ループ再生用のフレーズ PCM (長さちょうど・折り返しミックス)。"""
     mix = render_events(phrase_events(project), project.bpm, project.parts,
-                        phrase_ticks(project), rate, wrap=True)
+                        phrase_ticks(project), rate, wrap=True, sound=project.sound)
     return clip_to_pcm(mix)
 
 
 def render_song_loop(project: Project, rate: int = SAMPLE_RATE) -> bytes:
     """ループ再生用のソング PCM。"""
     mix = render_events(song_events(project), project.bpm, project.parts,
-                        song_ticks(project), rate, wrap=True)
+                        song_ticks(project), rate, wrap=True, sound=project.sound)
     return clip_to_pcm(mix)
 
 
 def render_preview(wave: int, pitch: int, tone: int, gate: int,
-                   rate: int = SAMPLE_RATE) -> bytes:
+                   rate: int = SAMPLE_RATE, sound: str = DEFAULT_SOUND) -> bytes:
     """鍵盤プレビュー用の単音 PCM。"""
-    voice = _cached_voice(wave, pitch, rate // 4, tone, gate, rate)
+    voice = _cached_voice(wave, pitch, rate // 4, tone, gate, rate, sound)
     return clip_to_pcm(voice)

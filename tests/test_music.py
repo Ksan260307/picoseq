@@ -49,6 +49,43 @@ class TestScales(unittest.TestCase):
                 self.assertTrue(0 <= degree < n)
 
 
+class TestPhotoScale(unittest.TestCase):
+    def test_get_scale_builtin(self):
+        from picoseq.core.music import get_scale
+        self.assertEqual(get_scale("minor"), SCALES["minor"])
+
+    def test_get_scale_photo(self):
+        from picoseq.core.music import get_scale
+        scale = get_scale("photo", (0, 3, 7, 10))
+        self.assertEqual(scale["intervals"], (0, 3, 7, 10))
+        self.assertEqual(len(scale["progression"]), 4)
+        for degree in scale["progression"]:
+            self.assertTrue(0 <= degree < 4)
+
+    def test_get_scale_photo_without_custom_raises(self):
+        from picoseq.core.music import get_scale
+        with self.assertRaises(ValueError):
+            get_scale("photo")
+
+    def test_functions_accept_custom(self):
+        custom = (0, 3, 7)
+        pitches = scale_pitches(0, "photo", custom=custom)
+        self.assertTrue(pitches)
+        for p in pitches:
+            self.assertIn(p % 12, (0, 3, 7))
+        self.assertTrue(in_scale(60, 0, "photo", custom))
+        self.assertFalse(in_scale(61, 0, "photo", custom))
+        chord = chord_at(0, "photo", 0, 4, custom=custom)
+        self.assertEqual(chord.root, 48)
+
+    def test_default_progression_short_scale(self):
+        from picoseq.core.music import default_progression
+        self.assertEqual(default_progression(3), (0, 2, 1, 2))
+        for n in range(3, 13):
+            for degree in default_progression(n):
+                self.assertTrue(0 <= degree < n)
+
+
 class TestFrequencies(unittest.TestCase):
     def test_table_length(self):
         self.assertEqual(len(PITCH_MILLIHZ), PITCH_COUNT)

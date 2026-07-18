@@ -7,7 +7,7 @@ from picoseq.core.prng import Rng
 
 class TestRng(unittest.TestCase):
     def test_pinned_sequence_seed1(self):
-        """既知の系列 — 実装を変えたら再生同一性が壊れることを検知する。"""
+        """既知の系列 — 実装を変えたら保存済みの曲の音が変わることを検知する。"""
         rng = Rng(1)
         self.assertEqual(
             [rng.next_u32() for _ in range(5)],
