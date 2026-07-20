@@ -83,8 +83,13 @@ def scale_note_names(photo: PhotoScale) -> list:
     return [NOTE_NAMES[(photo.key + iv) % 12] for iv in photo.intervals]
 
 
-def describe(photo: PhotoScale) -> str:
+def describe(photo: PhotoScale, lang: str = "ja") -> str:
     """検出結果の説明文 (ダイアログ・コマンドライン共用)。"""
+    if lang == "en":
+        notes = " · ".join(scale_note_names(photo))
+        return (f"Rectangles: {len(photo.pitch_classes)} → notes: {notes} ({len(photo.intervals)}-tone)\n"
+                f"Key: {KEY_NAMES[photo.key]} · Tempo: {photo.bpm} · Seed: {photo.seed}\n"
+                f"You can reselect this scale anytime as mood \"📷 Photo scale\".")
     notes = "・".join(scale_note_names(photo))
     label = get_scale("photo", photo.intervals)["label"]
     return (f"四角形: {len(photo.pitch_classes)} 個 → 使える音: {notes} ({len(photo.intervals)} 音)\n"

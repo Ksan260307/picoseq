@@ -109,19 +109,21 @@ class RollView:
         self.redraw_notes()
 
     def redraw_notes(self):
-        """音符レイヤーだけ描き直す。選択パートは明るく、他は暗く。"""
+        """音符を描き直す。選択中の (パート, レイヤー) は明るく、他は暗く。"""
         project = self.app.project
         steps = steps_of(project)
         canvas = self.canvas
         canvas.delete("note")
 
         current = self.app.part
-        layers = [(s, n) for s, n in active_notes(project.phrase) if n.step < steps]
-        for slot, note in layers:
-            if note.wave != current:
+        current_layer = self.app.layer
+        notes = [(s, n) for s, n in active_notes(project.phrase) if n.step < steps]
+        # 非選択を先に (暗く)、選択中を後に (明るく) 描いて前面へ
+        for slot, note in notes:
+            if not (note.wave == current and note.layer == current_layer):
                 self._draw_note(note, steps, theme.dim(theme.PART_COLORS[note.wave]), "")
-        for slot, note in layers:
-            if note.wave == current:
+        for slot, note in notes:
+            if note.wave == current and note.layer == current_layer:
                 self._draw_note(note, steps, theme.PART_COLORS[note.wave], theme.PLAYHEAD)
         canvas.tag_raise(self.hover_item)
         canvas.tag_raise(self.playhead_item)

@@ -1,17 +1,18 @@
-"""ヘルプ画面 — 使い方・ショートカット・各機能の説明。"""
+"""ヘルプ画面 — 使い方・ショートカット・各機能の説明 (日英)。"""
 
 import tkinter as tk
 
-from . import theme
+from . import i18n, theme
 
 # (見出し, [(項目, 説明), ...]) の並び。表示順に並べる。
-SECTIONS = [
+SECTIONS_JA = [
     ("🎵 フレーズを作る", [
         ("音を置く", "マス目を左クリック。もう一度クリックか右クリックで消せます。"),
         ("音を伸ばす", "置いたまま右へドラッグすると長くなります。"),
         ("試聴する", "左端の鍵盤をクリックすると、その高さの音が鳴ります。"),
         ("パート切替", "「パート」ボタン、またはキー 1〜4。メロディ・ベース・リズム・サブの4層。"),
-        ("音色・長さ", "選んだパートごとに、音の明るさ (音色) と長さを調整できます。"),
+        ("レイヤー", "各パートは「＋ 追加」で最大8層まで重ねられます。層ごとに音色・音を分けられ、自動作成も各層に音を入れます。"),
+        ("音色・長さ", "選んだパート (層) ごとに、音の明るさ (音色) と長さを調整できます。"),
         ("移調・反転", "🔼🔽 (または Ctrl+↑↓) で 1 オクターブ上げ下げ。🔄 でフレーズを時間反転。"),
         ("パート消去", "パートのボタンを右クリックすると、そのパートの音だけを消せます。"),
     ]),
@@ -43,6 +44,7 @@ SECTIONS = [
         ("音色セット", "上部の「音色」で全体の音の性格を選べます。ピコピコ 8bit (角の立った音)、"
                      "まろやか 16bit (丸くやさしい音)、きらめき 32bit (明るく厚い音)。"
                      "音色に合わせて画面の配色も衣替えします。"),
+        ("言語", "右上の 🌐 で表示を日本語 / English に切り替えられます。設定は次回も引き継がれます。"),
     ]),
     ("💾 保存とやり直し", [
         ("保存 / 読込", "作業内容をパソコンに保存・呼び出し。書出/取込で任意の場所に置けます。"),
@@ -51,7 +53,55 @@ SECTIONS = [
     ]),
 ]
 
-SHORTCUTS = [
+SECTIONS_EN = [
+    ("🎵 Make a phrase", [
+        ("Place a note", "Left-click a cell. Click again or right-click to erase it."),
+        ("Lengthen a note", "Drag right after placing to make it longer."),
+        ("Preview", "Click the keys on the left edge to hear that pitch."),
+        ("Switch part", "The \"Part\" buttons, or keys 1-4. Four voices: Melody, Bass, Rhythm, Sub."),
+        ("Layers", "Each part can stack up to 8 layers via \"＋ Add\". Layers get their own tone and notes, and Auto fills each one."),
+        ("Tone / Length", "Adjust the brightness (tone) and length per selected part (layer)."),
+        ("Transpose / Reverse", "🔼🔽 (or Ctrl+↑↓) shift one octave. 🔄 reverses the phrase in time."),
+        ("Clear a part", "Right-click a part button to erase just that part's notes."),
+    ]),
+    ("✨ Make it automatically", [
+        ("Auto", "Each press generates one phrase from a new \"seed\". The number shows in the field above; "
+                 "type it and press Enter to reproduce the exact same music anytime. "
+                 "After generating, the chord progression used (e.g. Am→F→C→G) appears at the bottom."),
+        ("🎲 Surprise", "Randomly picks mood, sound and seed all at once for a one-shot creation. "
+                       "Discover unexpected combinations from 65 moods."),
+        ("🎤 From humming", "Sing into the mic (or open a recorded WAV) and it reads your pitch "
+                          "into a melody. Then press \"🎸 Add backing\" to turn it into a song."),
+        ("🎸 Add backing", "Place only a melody (part 1) and press it to auto-add matching bass, rhythm and sub."),
+        ("📷 From photo", "Reads rectangles (up to 8) in a photo and turns their positions into a \"photo scale\". "
+                        "\"📷 Photo scale\" is added to Mood so you can compose using just those notes."),
+    ]),
+    ("🧩 Build a song", [
+        ("Auto song", "Builds a full arrangement (Intro→A→B→Outro) with one button. "
+                      "Patterns 1-4 and the song are wholly replaced."),
+        ("Save pattern", "Save a phrase you like with ★ (up to 8). They line up in the Song palette."),
+        ("Place", "Pick a pattern from the palette and place it on the grid below. Chain horizontally, stack vertically."),
+        ("Erase", "Click the same cell again, or right-click, to erase."),
+        ("Export WAV / MIDI", "Export the built song as an audio file (.wav) or a standard MIDI file (.mid) "
+                             "you can open in a DAW or notation software."),
+    ]),
+    ("▶ Playback and sound", [
+        ("Play / Stop", "Space key, or the play button. It loops."),
+        ("Live update", "Add or remove notes while playing and it reflects instantly (no need to stop)."),
+        ("Tempo", "Change it anytime with the top slider, even while playing."),
+        ("Sound set", "Pick the overall character with \"Sound\" at the top: Chiptune 8-bit (sharp-edged), "
+                     "Mellow 16-bit (round and soft), Crystal 32-bit (bright and full). "
+                     "The screen colors change to match."),
+        ("Language", "Switch the display between 日本語 / English with 🌐 at the top-right. The choice is remembered."),
+    ]),
+    ("💾 Save and undo", [
+        ("Save / Load", "Save and recall your work on the PC. Export/Import to place it anywhere."),
+        ("Undo", "Ctrl+Z / Ctrl+Y. Reverts most operations."),
+        ("Legacy version", "You can also import retro_project.json made with the older browser version."),
+    ]),
+]
+
+SHORTCUTS_JA = [
     ("Space", "再生 / 停止"),
     ("Esc", "停止"),
     ("1〜4", "パート切替"),
@@ -60,31 +110,60 @@ SHORTCUTS = [
     ("F1", "このヘルプ"),
 ]
 
+SHORTCUTS_EN = [
+    ("Space", "Play / Stop"),
+    ("Esc", "Stop"),
+    ("1-4", "Switch part"),
+    ("Ctrl+Z / Y", "Undo / Redo"),
+    ("Ctrl+Tab", "Phrase ⇄ Song"),
+    ("F1", "This help"),
+]
+
+_TEXT = {
+    "ja": {
+        "title": "PicoSeq の使い方",
+        "subtitle": "ドット絵風の音楽を作って鳴らすアプリです。",
+        "keyboard": "⌨ キーボード",
+        "close": "閉じる",
+    },
+    "en": {
+        "title": "How to use PicoSeq",
+        "subtitle": "An app to make and play pixel-art style music.",
+        "keyboard": "⌨ Keyboard",
+        "close": "Close",
+    },
+}
+
 
 class HelpDialog:
     def __init__(self, app):
         if getattr(app, "silent", False):
             return
+        lang = i18n.get_lang()
+        text = _TEXT[lang]
+        sections = SECTIONS_EN if lang == "en" else SECTIONS_JA
+        shortcuts = SHORTCUTS_EN if lang == "en" else SHORTCUTS_JA
+
         win = tk.Toplevel(app.root)
-        win.title("PicoSeq の使い方")
+        win.title(text["title"])
         win.configure(bg=theme.BG)
         win.transient(app.root)
         win.geometry("640x560")
         win.minsize(480, 400)
 
-        tk.Label(win, text="PicoSeq の使い方", font=theme.FONT_TITLE,
+        tk.Label(win, text=text["title"], font=theme.FONT_TITLE,
                  bg=theme.BG, fg=theme.ACCENT).pack(pady=(12, 4))
-        tk.Label(win, text="ドット絵風の音楽を作って鳴らすアプリです。",
+        tk.Label(win, text=text["subtitle"],
                  font=theme.FONT_SMALL, bg=theme.BG, fg=theme.TEXT_DIM).pack()
 
         body = self._scrollable(win)
-        for title, items in SECTIONS:
+        for title, items in sections:
             self._section(body, title, items)
-        self._shortcuts(body)
+        self._shortcuts(body, shortcuts, text["keyboard"])
 
         bar = tk.Frame(win, bg=theme.BG)
         bar.pack(fill="x", pady=8)
-        app._button(bar, "閉じる", win.destroy).pack()
+        app._button(bar, text["close"], win.destroy).pack()
         win.bind("<Escape>", lambda e: win.destroy())
         win.bind("<F1>", lambda e: win.destroy())
         # 表示できたら前面へ (掴みは取らず、裏で再生を続けられるように)
@@ -115,15 +194,15 @@ class HelpDialog:
             row = tk.Frame(parent, bg=theme.BG)
             row.pack(fill="x", pady=1)
             tk.Label(row, text=name, font=theme.FONT_BOLD, bg=theme.BG,
-                     fg=theme.TEXT, width=12, anchor="nw").pack(side="left")
+                     fg=theme.TEXT, width=14, anchor="nw").pack(side="left")
             tk.Label(row, text=desc, font=theme.FONT_SMALL, bg=theme.BG,
-                     fg=theme.TEXT_DIM, justify="left", wraplength=440,
+                     fg=theme.TEXT_DIM, justify="left", wraplength=430,
                      anchor="w").pack(side="left", fill="x", expand=True)
 
-    def _shortcuts(self, parent):
-        tk.Label(parent, text="⌨ キーボード", font=theme.FONT_BOLD, bg=theme.BG,
+    def _shortcuts(self, parent, shortcuts, heading):
+        tk.Label(parent, text=heading, font=theme.FONT_BOLD, bg=theme.BG,
                  fg=theme.ACCENT, anchor="w").pack(fill="x", pady=(12, 2))
-        for keys, desc in SHORTCUTS:
+        for keys, desc in shortcuts:
             row = tk.Frame(parent, bg=theme.BG)
             row.pack(fill="x", pady=1)
             tk.Label(row, text=keys, font=theme.FONT_MONO_BOLD, bg=theme.PANEL,

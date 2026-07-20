@@ -5,7 +5,8 @@ import tkinter as tk
 from ..vision.harmony import describe, photo_scale_from_quads, scale_note_names
 from ..vision.image import load_gray_grid
 from ..vision.quad import detect_quads
-from . import theme
+from . import i18n, theme
+from .i18n import t
 
 PREVIEW_ZOOM = 2
 
@@ -27,7 +28,7 @@ class PhotoDialog:
         self.photo_scale = photo
 
         win = tk.Toplevel(app.root)
-        win.title("フォト音階 — 写真から音階を取り込む")
+        win.title(t("photo_title"))
         win.configure(bg=theme.BG)
         win.transient(app.root)
         win.grab_set()
@@ -65,15 +66,15 @@ class PhotoDialog:
             canvas.create_text(cx, cy, text=f"{i + 1}:{note}",
                                font=theme.FONT_BOLD, fill=theme.PLAYHEAD)
 
-        tk.Label(win, text=describe(photo), font=theme.FONT, justify="left",
+        tk.Label(win, text=describe(photo, i18n.get_lang()), font=theme.FONT, justify="left",
                  bg=theme.BG, fg=theme.TEXT).pack(padx=14, pady=6, anchor="w")
 
         bar = tk.Frame(win, bg=theme.BG)
         bar.pack(pady=(2, 12))
-        app._button(bar, "♪ この音階で自動作成", self._apply_and_generate,
+        app._button(bar, t("photo_gen"), self._apply_and_generate,
                     accent=True).pack(side="left", padx=6)
-        app._button(bar, "🎼 音階だけ取り込む", self._apply_only).pack(side="left", padx=6)
-        app._button(bar, "閉じる", win.destroy).pack(side="left", padx=6)
+        app._button(bar, t("photo_only"), self._apply_only).pack(side="left", padx=6)
+        app._button(bar, t("photo_close"), win.destroy).pack(side="left", padx=6)
         win.bind("<Return>", lambda e: self._apply_and_generate())
         win.bind("<Escape>", lambda e: win.destroy())
 

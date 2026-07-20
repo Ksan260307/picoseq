@@ -7,13 +7,14 @@
 from . import phrase as phrase_ops
 from . import song as song_ops
 from .arranger import arrange
-from .composer import compose
+from .composer import compose, compose_layers
 from .constants import (
     BEATS_MAX,
     BEATS_MIN,
     BPM_MAX,
     BPM_MIN,
     EMPTY_CELL,
+    MAX_LAYERS,
     PART_COUNT,
     PATTERN_COUNT,
     PITCH_MAX,
@@ -122,26 +123,61 @@ def set_sound(project: Project, sound: str) -> Project:
     return update(project, sound=sound)
 
 
-# ---- パート設定 ----
+# ---- パート・レイヤー設定 ----
 
-def set_part_tone(project: Project, part: int, tone: int) -> Project:
-    _check_part(part)
-    tone = clamp(int(tone), 0, 100)
-    if tone == project.parts[part].tone:
+def _set_layer_field(project, wave, layer, **fields):
+    """(wave, layer) の PartParams を書き換える。無変更なら元のまま。"""
+    _check_layer(project, wave, layer)
+    current = project.parts[wave][layer]
+    updated = update(current, **fields)
+    if updated == current:
+        return project
+    parts = [list(layers) for layers in project.parts]
+    parts[wave][layer] = updated
+    return update(project, parts=tuple(tuple(p) for p in parts))
+
+
+def set_part_tone(project: Project, wave: int, tone: int, layer: int = 0) -> Project:
+    return _set_layer_field(project, wave, layer, tone=clamp(int(tone), 0, 100))
+
+
+def set_part_gate(project: Project, wave: int, gate: int, layer: int = 0) -> Project:
+    return _set_layer_field(project, wave, layer, gate=clamp(int(gate), 10, 100))
+
+
+def add_layer(project: Project, wave: int) -> Project:
+    """パートにレイヤーを 1 つ足す (最大 MAX_LAYERS)。既存の設定を引き継ぐ。"""
+    _check_part(wave)
+    layers = project.parts[wave]
+    if len(layers) >= MAX_LAYERS:
         return project
     parts = list(project.parts)
-    parts[part] = update(parts[part], tone=tone)
+    parts[wave] = layers + (layers[-1],)  # 直前の音作りを引き継ぐ
     return update(project, parts=tuple(parts))
 
 
-def set_part_gate(project: Project, part: int, gate: int) -> Project:
-    _check_part(part)
-    gate = clamp(int(gate), 10, 100)
-    if gate == project.parts[part].gate:
-        return project
+def remove_layer(project: Project, wave: int, layer: int) -> Project:
+    """パートのレイヤー (1 層目以外) を消す。そのレイヤーの音符も消し、番号を詰める。"""
+    _check_layer(project, wave, layer)
+    if layer == 0:
+        raise ValueError("1 層目は削除できません。")
+    from .note import Note
+    layers = list(project.parts[wave])
+    del layers[layer]
     parts = list(project.parts)
-    parts[part] = update(parts[part], gate=gate)
-    return update(project, parts=tuple(parts))
+    parts[wave] = tuple(layers)
+
+    # 対象レイヤーの音符を消し、より上のレイヤーの番号を 1 つ下げる
+    kept = []
+    for _, note in phrase_ops.active_notes(project.phrase):
+        if note.wave == wave and note.layer == layer:
+            continue
+        if note.wave == wave and note.layer > layer:
+            kept.append(Note(note.pitch, note.step, note.wave, note.dur, note.layer - 1))
+        else:
+            kept.append(note)
+    return update(project, parts=tuple(parts),
+                  phrase=phrase_ops.build_phrase(kept))
 
 
 def _check_part(part: int):
@@ -149,18 +185,25 @@ def _check_part(part: int):
         raise ValueError(f"パート番号が範囲外です: {part}")
 
 
+def _check_layer(project: Project, wave: int, layer: int):
+    _check_part(wave)
+    if not (0 <= layer < len(project.parts[wave])):
+        raise ValueError(f"レイヤー番号が範囲外です: {layer}")
+
+
 # ---- フレーズ編集 ----
 
-def place_note(project: Project, pitch: int, step: int, wave: int, dur: int = 1):
+def place_note(project: Project, pitch: int, step: int, wave: int, dur: int = 1,
+               layer: int = 0):
     """音符を置く。(新しい Project, スロット番号) を返す。満杯なら (元 Project, -1)。"""
     steps = steps_of(project)
     if not (PITCH_MIN <= pitch <= PITCH_MAX):
         raise ValueError(f"音の高さが範囲外です: {pitch}")
     if not (0 <= step < steps):
         raise ValueError(f"ステップが範囲外です: {step}")
-    _check_part(wave)
+    _check_layer(project, wave, layer)
     dur = clamp(int(dur), 1, steps - step)
-    buffer, slot = phrase_ops.add_note(project.phrase, pitch, step, wave, dur)
+    buffer, slot = phrase_ops.add_note(project.phrase, pitch, step, wave, dur, layer)
     if slot == -1:
         return project, -1
     return update(project, phrase=buffer), slot
@@ -196,11 +239,17 @@ def clear_phrase(project: Project) -> Project:
     return update(project, phrase=phrase_ops.EMPTY_PHRASE)
 
 
-def clear_part(project: Project, wave: int) -> Project:
-    """指定パートの音符だけを消す (他パートは残す)。"""
+def clear_part(project: Project, wave: int, layer: int = None) -> Project:
+    """指定パートの音符を消す。layer 指定でそのレイヤーだけ、None で全レイヤー。"""
     _check_part(wave)
+
+    def drop(note):
+        if note.wave != wave:
+            return False
+        return layer is None or note.layer == layer
+
     kept = [note for _, note in phrase_ops.active_notes(project.phrase)
-            if note.wave != wave]
+            if not drop(note)]
     buffer = phrase_ops.build_phrase(kept)
     if buffer == project.phrase:
         return project
@@ -221,7 +270,7 @@ def transpose(project: Project, semitones: int) -> Project:
             continue
         pitch = note.pitch + semitones
         if PITCH_MIN <= pitch <= PITCH_MAX:
-            notes.append(Note(pitch, note.step, note.wave, note.dur))
+            notes.append(Note(pitch, note.step, note.wave, note.dur, note.layer))
             if semitones:
                 changed = True
         else:
@@ -243,17 +292,22 @@ def reverse_phrase(project: Project) -> Project:
         if start < 0:
             start = 0
         dur = min(note.dur, steps - start)
-        notes.append(Note(note.pitch, start, note.wave, dur))
+        notes.append(Note(note.pitch, start, note.wave, dur, note.layer))
     buffer = phrase_ops.build_phrase(notes)
     if buffer == project.phrase:
         return project
     return update(project, phrase=buffer)
 
 
+def _layer_counts(project: Project) -> tuple:
+    return tuple(len(project.parts[wave]) for wave in range(PART_COUNT))
+
+
 def generate_phrase(project: Project) -> Project:
-    """現在の設定 (拍子・キー・音階・シード・進行) からフレーズを自動作成する。"""
-    buffer = compose(project.beats, project.key, project.scale, project.seed,
-                     project.progression, project.custom_scale)
+    """現在の設定 (拍子・キー・音階・シード・進行・レイヤー数) からフレーズを自動作成する。"""
+    buffer = compose_layers(project.beats, project.key, project.scale, project.seed,
+                            _layer_counts(project), project.progression,
+                            project.custom_scale)
     return update(project, phrase=buffer)
 
 

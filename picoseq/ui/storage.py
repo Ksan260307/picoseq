@@ -1,5 +1,6 @@
 """ファイル置き場 — 自動保存と再生用一時 WAV。"""
 
+import json
 from pathlib import Path
 
 
@@ -12,6 +13,23 @@ def data_dir() -> Path:
 
 def autosave_path() -> Path:
     return data_dir() / "autosave.json"
+
+
+def settings_path() -> Path:
+    return data_dir() / "settings.json"
+
+
+def load_settings() -> dict:
+    """アプリ設定 (言語・ライセンス等)。無い・壊れていれば空の辞書。"""
+    try:
+        data = json.loads(settings_path().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_settings(settings: dict):
+    settings_path().write_text(json.dumps(settings, ensure_ascii=False), encoding="utf-8")
 
 
 def save_text(path: Path, text: str):

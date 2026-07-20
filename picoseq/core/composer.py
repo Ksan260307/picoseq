@@ -9,6 +9,7 @@
 """
 
 from .constants import (
+    PART_COUNT,
     PITCH_MAX,
     PITCH_MIN,
     WAVE_NOISE,
@@ -41,6 +42,56 @@ def compose(beats: int, key: int, scale_id: str, seed: int,
     notes = _compose_notes(beats, key, scale_id, seed, progression, custom,
                            with_melody=True)
     return build_phrase(notes)
+
+
+def compose_layers(beats: int, key: int, scale_id: str, seed: int,
+                   layer_counts, progression=None, custom=None) -> tuple:
+    """パートごとのレイヤー数を考慮してフレーズを作る。
+
+    layer_counts は各パート (波形) のレイヤー数のタプル。
+    レイヤー 0 は従来どおりの 4 パート。1 層目以降は、同じコード進行の上に
+    別のシードで重ねる (旋律なら別のフレーズ、伴奏なら別のパターン)。
+    """
+    base = _compose_notes(beats, key, scale_id, seed, progression, custom,
+                          with_melody=True)  # レイヤー 0 (全パート)
+    notes = list(base)
+    prog = chosen_progression(scale_id, seed, custom, progression)  # base と同じ進行
+    for wave in range(PART_COUNT):
+        count = layer_counts[wave] if wave < len(layer_counts) else 1
+        for layer in range(1, count):
+            notes.extend(_compose_extra_layer(wave, layer, beats, key, scale_id,
+                                              seed, prog, custom))
+    return build_phrase(notes)
+
+
+def _compose_extra_layer(wave, layer, beats, key, scale_id, seed, prog, custom):
+    """1 パートの追加レイヤーを 1 つ作る。そのパートの音だけを返す。"""
+    rng = Rng((seed * 7919 + wave * 131 + layer * 977 + 12345) & 0xFFFFFFFF)
+    steps = steps_per_phrase(beats)
+    out = []
+
+    def emit(pitch, step, w, dur):
+        dur = min(dur, steps - step)
+        if PITCH_MIN <= pitch <= PITCH_MAX and dur >= 1:
+            out.append(Note(pitch, step, w, dur, layer))
+
+    def chord_of(step):
+        return chord_at(key, scale_id, step, beats, prog, custom)
+
+    if wave == WAVE_PULSE:
+        _compose_melody(None, emit, rng, beats, key, scale_id,
+                        steps, chord_of, custom,
+                        rng.next_int(MELODY_RHYTHMS), rng.next_int(MOTIF_MODES))
+    elif wave == WAVE_TRIANGLE:
+        _compose_bass(None, emit, rng, beats, scale_id, steps, chord_of,
+                      rng.next_int(BASS_STYLES))
+    elif wave == WAVE_NOISE:
+        _compose_drums(None, emit, rng, beats, scale_id, steps,
+                       rng.next_int(DRUM_STYLES))
+    else:  # WAVE_SAW
+        _compose_backing(None, emit, rng, scale_id, steps, chord_of,
+                         rng.next_int(BACKING_STYLES))
+    return out
 
 
 def accompany_notes(beats: int, key: int, scale_id: str, seed: int,

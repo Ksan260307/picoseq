@@ -107,7 +107,7 @@ class TestCustomScaleField(unittest.TestCase):
         data = to_jsonable(self._photo_project())
         data["custom_scale"] = None
         p = loads(json.dumps(data))
-        self.assertEqual(p.scale, "minor")
+        self.assertEqual(p.scale, "major")
 
     def test_invalid_custom_scale_dropped(self):
         base = to_jsonable(self._photo_project())
@@ -117,7 +117,7 @@ class TestCustomScaleField(unittest.TestCase):
                 data["custom_scale"] = bad
                 p = loads(json.dumps(data))
                 self.assertIsNone(p.custom_scale)
-                self.assertEqual(p.scale, "minor")
+                self.assertEqual(p.scale, "major")
 
     def test_progression_validated_against_custom_scale(self):
         p = self._photo_project()  # 5 音
@@ -172,7 +172,7 @@ class TestSanitize(unittest.TestCase):
         self.assertEqual(p.beats, 7)
 
     def test_unknown_scale_falls_back(self):
-        self.assertEqual(self._load_with(scale="polka").scale, "minor")
+        self.assertEqual(self._load_with(scale="polka").scale, "major")
 
     def test_invalid_notes_dropped(self):
         p = self._load_with(phrase=[
@@ -200,8 +200,8 @@ class TestSanitize(unittest.TestCase):
         p = self._load_with(song=[0], parts=[{"tone": 10, "gate": 20}], patterns=[])
         self.assertEqual(len(p.song), 64)
         self.assertEqual(len(p.parts), 4)
-        self.assertEqual(p.parts[0].tone, 10)
-        self.assertEqual(p.parts[1].tone, 50)  # 既定値
+        self.assertEqual(p.parts[0][0].tone, 10)
+        self.assertEqual(p.parts[1][0].tone, 50)  # 既定値
         self.assertEqual(len(p.patterns), 8)
 
 
@@ -241,12 +241,12 @@ class TestLegacyImport(unittest.TestCase):
         self.assertEqual(count_notes(p.patterns[2].notes), 1)
         self.assertEqual(p.song[0], 2)
         self.assertEqual(p.song[3], EMPTY_CELL)
-        self.assertEqual(p.parts[0].tone, 25)
-        self.assertEqual(p.parts[0].gate, 90)
-        self.assertEqual(p.parts[3].gate, 30)
+        self.assertEqual(p.parts[0][0].tone, 25)
+        self.assertEqual(p.parts[0][0].gate, 90)
+        self.assertEqual(p.parts[3][0].gate, 30)
         # 旧形式に無い値は既定
         self.assertEqual(p.bpm, 120)
-        self.assertEqual(p.scale, "minor")
+        self.assertEqual(p.scale, "major")
 
     def test_migrated_project_roundtrips_as_new_format(self):
         p = loads(json.dumps(self._legacy_data()))

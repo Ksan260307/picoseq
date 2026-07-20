@@ -107,9 +107,9 @@ class TestSetters(unittest.TestCase):
 
     def test_part_params(self):
         p = actions.set_part_tone(self.p, 2, 999)
-        self.assertEqual(p.parts[2].tone, 100)
+        self.assertEqual(p.parts[2][0].tone, 100)
         p = actions.set_part_gate(p, 2, 0)
-        self.assertEqual(p.parts[2].gate, 10)
+        self.assertEqual(p.parts[2][0].gate, 10)
         # 他パートは不変
         self.assertEqual(p.parts[0], self.p.parts[0])
         with self.assertRaises(ValueError):

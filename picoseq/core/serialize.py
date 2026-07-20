@@ -14,6 +14,7 @@ from .constants import (
     BPM_MAX,
     BPM_MIN,
     EMPTY_CELL,
+    MAX_LAYERS,
     MAX_STEPS,
     PART_COUNT,
     PATTERN_COUNT,
@@ -54,7 +55,9 @@ def to_jsonable(project: Project) -> dict:
         "progression": list(project.progression) if project.progression is not None else None,
         "custom_scale": list(project.custom_scale) if project.custom_scale is not None else None,
         "sound": project.sound,
-        "parts": [{"tone": p.tone, "gate": p.gate} for p in project.parts],
+        # parts[wave] = レイヤーごとの {tone, gate} の並び
+        "parts": [[{"tone": p.tone, "gate": p.gate} for p in layers]
+                  for layers in project.parts],
         "phrase": _notes_to_json(project.phrase),
         "patterns": [
             {"used": p.used, "notes": _notes_to_json(p.notes)} for p in project.patterns
@@ -69,7 +72,7 @@ def dumps(project: Project) -> str:
 
 
 def _notes_to_json(buffer: tuple) -> list:
-    return [[n.pitch, n.step, n.wave, n.dur] for _, n in active_notes(buffer)]
+    return [[n.pitch, n.step, n.wave, n.dur, n.layer] for _, n in active_notes(buffer)]
 
 
 # ---- 復号 ----
@@ -106,6 +109,7 @@ def from_jsonable(data: dict) -> Project:
         scale = DEFAULT_SCALE
 
     beats = clamp(_as_int(data.get("beats"), 4), BEATS_MIN, BEATS_MAX)
+    phrase_notes = _notes_list_from_json(data.get("phrase"))
 
     patterns = []
     raw_patterns = _as_list(data.get("patterns"), PATTERN_COUNT)
@@ -124,8 +128,8 @@ def from_jsonable(data: dict) -> Project:
         progression=_progression_from_json(data.get("progression"), scale, custom_scale),
         custom_scale=custom_scale,
         sound=data.get("sound") if data.get("sound") in SOUND_SETS else DEFAULT_SOUND,
-        parts=_parts_from_json(data.get("parts")),
-        phrase=_notes_from_json(data.get("phrase")),
+        parts=_cover_layers(_parts_from_json(data.get("parts")), phrase_notes),
+        phrase=build_phrase(phrase_notes),
         patterns=tuple(patterns),
         song=_song_from_json(data.get("song")),
     )
@@ -177,7 +181,7 @@ def _as_list(value, length: int) -> list:
     return items[:length]
 
 
-def _valid_note(pitch: int, step: int, wave: int, dur: int):
+def _valid_note(pitch: int, step: int, wave: int, dur: int, layer: int = 0):
     """範囲内なら Note、範囲外なら None。dur はグリッド内に収める。"""
     if not (PITCH_MIN <= pitch <= PITCH_MAX):
         return None
@@ -185,31 +189,65 @@ def _valid_note(pitch: int, step: int, wave: int, dur: int):
         return None
     if not (0 <= wave < PART_COUNT):
         return None
-    return Note(pitch, step, wave, clamp(dur, 1, 255))
+    if not (0 <= layer < MAX_LAYERS):
+        layer = 0
+    return Note(pitch, step, wave, clamp(dur, 1, 255), layer)
 
 
-def _notes_from_json(raw) -> tuple:
+def _notes_list_from_json(raw) -> list:
+    """音符リストを Note の列にする。4 要素 (旧) は layer=0、5 要素は layer 付き。"""
     notes = []
     if isinstance(raw, list):
         for item in raw:
-            if not (isinstance(item, list) and len(item) == 4
+            if not (isinstance(item, list) and len(item) in (4, 5)
                     and all(isinstance(v, int) and not isinstance(v, bool) for v in item)):
                 continue
-            note = _valid_note(item[0], item[1], item[2], item[3])
+            layer = item[4] if len(item) == 5 else 0
+            note = _valid_note(item[0], item[1], item[2], item[3], layer)
             if note is not None:
                 notes.append(note)
-    return build_phrase(notes)
+    return notes
+
+
+def _notes_from_json(raw) -> tuple:
+    return build_phrase(_notes_list_from_json(raw))
 
 
 def _parts_from_json(raw) -> tuple:
+    """パート設定を復元する。新形式はレイヤーの並び、旧 (v4以前) は単一 dict。"""
+    per_wave = _as_list(raw, PART_COUNT)
     parts = []
-    items = _as_list(raw, PART_COUNT)
     for i in range(PART_COUNT):
-        entry = items[i] if isinstance(items[i], dict) else {}
-        tone = clamp(_as_int(entry.get("tone"), 50), 0, 100)
-        gate = clamp(_as_int(entry.get("gate"), 80), 10, 100)
-        parts.append(PartParams(tone=tone, gate=gate))
+        entry = per_wave[i]
+        if isinstance(entry, list):
+            layer_dicts = entry
+        elif isinstance(entry, dict):
+            layer_dicts = [entry]  # 旧形式: パートに 1 レイヤー
+        else:
+            layer_dicts = [{}]
+        layers = []
+        for d in layer_dicts[:MAX_LAYERS]:
+            d = d if isinstance(d, dict) else {}
+            tone = clamp(_as_int(d.get("tone"), 50), 0, 100)
+            gate = clamp(_as_int(d.get("gate"), 80), 10, 100)
+            layers.append(PartParams(tone=tone, gate=gate))
+        parts.append(tuple(layers) if layers else (PartParams(),))
     return tuple(parts)
+
+
+def _cover_layers(parts: tuple, notes: list) -> tuple:
+    """音符が使うレイヤーを必ずパートが持つよう、足りない分を補う。"""
+    max_layer = [0] * PART_COUNT
+    for note in notes:
+        if note.layer > max_layer[note.wave]:
+            max_layer[note.wave] = note.layer
+    out = []
+    for wave in range(PART_COUNT):
+        layers = list(parts[wave])
+        while len(layers) <= max_layer[wave] and len(layers) < MAX_LAYERS:
+            layers.append(layers[-1])
+        out.append(tuple(layers))
+    return tuple(out)
 
 
 def _song_from_json(raw) -> tuple:
@@ -284,5 +322,6 @@ def _parts_from_legacy(raw) -> tuple:
         gate = entry.get("length")
         tone = int(round(tone * 100)) if isinstance(tone, (int, float)) and not isinstance(tone, bool) else 50
         gate = int(round(gate * 100)) if isinstance(gate, (int, float)) and not isinstance(gate, bool) else 80
-        parts.append(PartParams(tone=clamp(tone, 0, 100), gate=clamp(gate, 10, 100)))
+        # 旧データはパートあたり 1 レイヤー
+        parts.append((PartParams(tone=clamp(tone, 0, 100), gate=clamp(gate, 10, 100)),))
     return tuple(parts)

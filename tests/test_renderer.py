@@ -23,8 +23,8 @@ from picoseq.core.renderer import _render_events_numpy, _render_events_python
 from picoseq.core.schedule import Event, samples_per_tick
 from picoseq.core.synth import voice_samples
 
-GOLDEN_PHRASE_CRC = 2307023968  # seed=42, 4/4, C minor, 既定パート設定
-GOLDEN_SONG_CRC = 2115512827    # 上記フレーズをパターン0 に保存し ブロック0,1 へ配置
+GOLDEN_PHRASE_CRC = 881217308  # seed=42, 4/4, C major, 既定パート設定
+GOLDEN_SONG_CRC = 43718573    # 上記フレーズをパターン0 に保存し ブロック0,1 へ配置
 
 
 def _seed42_project():

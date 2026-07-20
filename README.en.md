@@ -8,8 +8,11 @@ Place notes on a grid to build a song — or start from a photo or your own humm
 ## Features
 
 - Draw phrases on a grid, then arrange them into a full song
-- Four layered parts (melody / bass / rhythm / sub)
-- **🎹 Sound sets** — "Pico 8-bit", "Mellow 16-bit", and "Sparkle 32-bit".
+- Four parts (melody / bass / rhythm / sub)
+- **🧅 Layers per part** — stack up to 8 layers per part via "＋ Add". Give each layer its own
+  tone and notes for harmonies and thickness; ✨ Auto fills every layer too (up to 32 voices)
+- **🌐 Japanese / English** — switch the display language with 🌐 at the top-right; the choice is remembered
+- **🎹 Sound sets** — "Chiptune 8-bit", "Mellow 16-bit", and "Crystal 32-bit".
   Switching also re-skins the whole interface to match
 - **🎼 65 moods** — major / minor / all church modes / modes of the melodic & harmonic minor /
   Japanese scales (in-sen, ryukyu, …) / blues, jazz, whole-tone, diminished / world scales
@@ -33,6 +36,21 @@ Place notes on a grid to build a song — or start from a photo or your own humm
   notation software (parts split across MIDI channels)
 - Audio is synthesized with integer math only, so the same project produces a bit-identical WAV on any machine
 - Runs on the Python standard library alone — nothing to install
+
+### Free vs. paid
+
+The free version already covers almost everything — phrase editing, playback, WAV export.
+Entering a product code unlocks the paid version (from **🔑 License** at the top-right).
+
+| | Free | Paid |
+| --- | --- | --- |
+| ✨ Auto / 🎲 Surprise / 🎼 Auto-song | up to 100 per day (combined) | unlimited |
+| 🎧 WAV export | ✓ | ✓ |
+| 🎹 MIDI export | — | ✓ |
+| All other editing & playback | ✓ | ✓ |
+
+The daily auto-generation count resets when the date changes. Product codes are validated
+offline (`picoseq/core/license.py`) — there is no server communication.
 
 Optional extras: `numpy` (faster rendering) and `Pillow` (JPEG photos).
 Everything works without them (PNG / BMP / PPM decoders are built in).
@@ -84,7 +102,9 @@ and also uploads a Windows exe on tags.
 - Click a note (or right-click) to erase it
 - Click the piano keys on the left to preview a pitch
 - Switch parts with the part buttons or keys `1`–`4`
-- Shape each part's sound with the *tone* and *length* sliders
+- **Layers** — use "＋ Add" below the parts to stack layers (up to 8 per part); select a layer by
+  number, delete layers 2+ with "✕ N". Each layer has its own tone and notes
+- Shape each part (layer)'s sound with the *tone* and *length* sliders
 - **✨ Auto-compose** — each press picks a fresh seed value; type a number and press Enter to recreate that exact tune
 - **🎤 From humming** — record 6 seconds (or open a WAV file) to extract a melody
 - **🎸 Auto-accompany** — generates the other three parts to fit your melody
@@ -123,6 +143,7 @@ The imported scale stays available in the mood selector as *📷 Photo Scale*.
 - Tempo changes apply during playback too
 - The *sound* selector in the header changes the overall character —
   **the color scheme changes with it** (green → purple → indigo), and the choice is saved
+- Use 🌐 at the top-right to switch between Japanese and English; the choice is remembered
 
 **Keyboard**
 
@@ -161,8 +182,9 @@ picoseq/
 │   │   ├── synth.py       fixed-point synth (pulse/triangle/noise/saw)
 │   │   ├── renderer.py    mixer (voice cache, optional numpy fast path)
 │   │   ├── wavio.py       WAV encoding
-│   │   ├── midiio.py      standard MIDI file export
+│   │   ├── midiio.py      standard MIDI file export (split per layer)
 │   │   ├── serialize.py   versioned JSON save files + legacy migration
+│   │   ├── license.py     offline product-code validation (pure functions)
 │   │   └── history.py     undo / redo
 │   ├── vision/            photo scale (image analysis)
 │   │   ├── image.py       image loading (built-in PNG/BMP/PPM decoders)
@@ -176,9 +198,12 @@ picoseq/
 │       ├── photo.py       photo-scale dialog
 │       ├── hum.py         humming dialog
 │       ├── mic.py         microphone recording (native Windows API)
-│       ├── help.py        help screen
+│       ├── help.py        help screen (JP/EN)
+│       ├── i18n.py        display language (Japanese / English)
+│       ├── licensing.py   free-tier tracking + product-code storage
+│       ├── license_dialog.py  license screen
 │       ├── playback.py    playback, position clock, mid-loop restart
-│       ├── storage.py     file locations
+│       ├── storage.py     file locations + app settings (language, license)
 │       └── theme.py       colors and fonts
 └── tests/                 test suite (py -m unittest)
 ```

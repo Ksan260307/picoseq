@@ -86,7 +86,7 @@ SCALES = {
     "spanish8":   {"label": "スペイン (八音)",            "intervals": (0, 1, 3, 4, 5, 6, 8, 10), "progression": (0, 3, 4, 0)},
 }
 SCALE_IDS = tuple(SCALES)
-DEFAULT_SCALE = "minor"
+DEFAULT_SCALE = "major"
 PHOTO_SCALE = "photo"  # 写真から抽出したカスタム音階 (プロジェクトごとに音の並びが違う)
 
 # ---- コード進行の自動生成 ----

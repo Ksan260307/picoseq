@@ -15,11 +15,12 @@ def replace_slot(buffer: tuple, slot: int, value: int) -> tuple:
     return buffer[:slot] + (value,) + buffer[slot + 1:]
 
 
-def add_note(buffer: tuple, pitch: int, step: int, wave: int, dur: int = 1):
+def add_note(buffer: tuple, pitch: int, step: int, wave: int, dur: int = 1, layer: int = 0):
     """先頭の空きスロットに追加し (新バッファ, スロット番号) を返す。満杯なら (元バッファ, -1)。"""
     for slot, value in enumerate(buffer):
         if not is_active(value):
-            return replace_slot(buffer, slot, pack_note(pitch, step, wave, dur)), slot
+            return replace_slot(buffer, slot,
+                                pack_note(pitch, step, wave, dur, layer=layer)), slot
     return buffer, -1
 
 
@@ -32,19 +33,21 @@ def resize_note(buffer: tuple, slot: int, dur: int) -> tuple:
     """スロットの音符の長さを変える。"""
     note = unpack_note(buffer[slot])
     dur = max(1, min(dur, 255))
-    return replace_slot(buffer, slot, pack_note(note.pitch, note.step, note.wave, dur))
+    return replace_slot(buffer, slot,
+                        pack_note(note.pitch, note.step, note.wave, dur, layer=note.layer))
 
 
-def find_note_at(buffer: tuple, pitch: int, step: int, wave: int) -> int:
+def find_note_at(buffer: tuple, pitch: int, step: int, wave: int, layer: int = 0) -> int:
     """指定セルを覆っている音符のスロット番号を返す (無ければ -1)。
 
-    同じパートの音符だけが対象。step は音符の継続範囲内でも一致する。
+    同じパート・同じレイヤーの音符だけが対象。step は音符の継続範囲内でも一致する。
     """
     for slot, value in enumerate(buffer):
         if not is_active(value):
             continue
         note = unpack_note(value)
-        if note.pitch == pitch and note.wave == wave and note.step <= step < note.step + note.dur:
+        if (note.pitch == pitch and note.wave == wave and note.layer == layer
+                and note.step <= step < note.step + note.dur):
             return slot
     return -1
 
@@ -76,6 +79,12 @@ def count_notes(buffer: tuple) -> int:
 
 def build_phrase(notes) -> tuple:
     """Note の列からバッファを作る (先頭から順に詰める)。あふれた分は捨てる。"""
-    values = [pack_note(n.pitch, n.step, n.wave, n.dur) for n in notes[:MAX_NOTES]]
+    values = [pack_note(n.pitch, n.step, n.wave, n.dur, layer=getattr(n, "layer", 0))
+              for n in notes[:MAX_NOTES]]
     values += [0] * (MAX_NOTES - len(values))
     return tuple(values)
+
+
+def layer_of_slot(buffer: tuple, slot: int) -> int:
+    """スロットの音符のレイヤー番号。"""
+    return unpack_note(buffer[slot]).layer

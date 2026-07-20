@@ -70,6 +70,14 @@ def _mix_extent(total_ticks, spt, wrap, rate):
     return loop_len, total
 
 
+def _layer_params(parts, wave, layer):
+    """(wave, layer) の音作りパラメータ。範囲外は最後のレイヤーへ丸める。"""
+    layers = parts[wave]
+    if layer >= len(layers):
+        layer = len(layers) - 1
+    return layers[layer]
+
+
 def _render_events_python(events, bpm, parts, total_ticks, rate, wrap,
                           sound=DEFAULT_SOUND):
     """リファレンス実装 (純 Python)。numpy 経路はこれと完全一致でなければならない。"""
@@ -77,7 +85,7 @@ def _render_events_python(events, bpm, parts, total_ticks, rate, wrap,
     loop_len, total = _mix_extent(total_ticks, spt, wrap, rate)
     mix = [0] * total
     for event in events:
-        part = parts[event.wave]
+        part = _layer_params(parts, event.wave, event.layer)
         voice = _cached_voice(event.wave, event.pitch, event.dur * spt,
                               part.tone, part.gate, rate, sound)
         start = event.tick * spt
@@ -98,7 +106,7 @@ def _render_events_numpy(events, bpm, parts, total_ticks, rate, wrap,
     loop_len, total = _mix_extent(total_ticks, spt, wrap, rate)
     mix = _np.zeros(total, dtype=_np.int64)
     for event in events:
-        part = parts[event.wave]
+        part = _layer_params(parts, event.wave, event.layer)
         voice = _cached_voice(event.wave, event.pitch, event.dur * spt,
                               part.tone, part.gate, rate, sound)
         if not voice:

@@ -1,7 +1,8 @@
 """共通定数 — データ形式の上限値とパート定義。"""
 
 APP_ID = "picoseq"
-SCHEMA_VERSION = 4  # v2: progression / v3: custom_scale / v4: sound (音色セット)
+# v2: progression / v3: custom_scale / v4: sound / v5: パートのレイヤー (複数化)
+SCHEMA_VERSION = 5
 
 # 音色セット (シンセの性格)。UI での表示名は theme 側で持つ
 SOUND_SETS = ("retro8", "warm16", "clear32")
@@ -31,6 +32,7 @@ WAVE_TRIANGLE = 1  # ベース: 三角波
 WAVE_NOISE = 2     # リズム: ノイズ
 WAVE_SAW = 3       # サブ: ノコギリ波
 PART_COUNT = 4
+MAX_LAYERS = 8     # 1 パートあたりのレイヤー (重ね) の上限
 
 # ソング
 PATTERN_COUNT = 8
