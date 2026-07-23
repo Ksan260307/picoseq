@@ -60,7 +60,8 @@ def to_jsonable(project: Project) -> dict:
                   for layers in project.parts],
         "phrase": _notes_to_json(project.phrase),
         "patterns": [
-            {"used": p.used, "notes": _notes_to_json(p.notes)} for p in project.patterns
+            {"used": p.used, "notes": _notes_to_json(p.notes), "name": p.name}
+            for p in project.patterns
         ],
         "song": [-1 if cell == EMPTY_CELL else cell for cell in project.song],
     }
@@ -117,7 +118,7 @@ def from_jsonable(data: dict) -> Project:
         entry = raw_patterns[i] if isinstance(raw_patterns[i], dict) else {}
         used = bool(entry.get("used"))
         notes = _notes_from_json(entry.get("notes"))
-        patterns.append(Pattern(used=used, notes=notes))
+        patterns.append(Pattern(used=used, notes=notes, name=_name_from_json(entry.get("name"))))
 
     return Project(
         bpm=clamp(_as_int(data.get("bpm"), 120), BPM_MIN, BPM_MAX),
@@ -179,6 +180,14 @@ def _as_list(value, length: int) -> list:
     items = list(value) if isinstance(value, list) else []
     items += [None] * (length - len(items))
     return items[:length]
+
+
+def _name_from_json(value) -> str:
+    """パターン名を復元する。文字列以外・schema 5 以前 (name 無し) は空文字。"""
+    from .constants import PATTERN_NAME_MAX
+    if not isinstance(value, str):
+        return ""
+    return " ".join(value.split())[:PATTERN_NAME_MAX]
 
 
 def _valid_note(pitch: int, step: int, wave: int, dur: int, layer: int = 0):

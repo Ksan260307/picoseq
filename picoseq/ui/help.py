@@ -28,11 +28,17 @@ SECTIONS_JA = [
         ("📷 写真から", "写真の中の四角形 (最大8個) を読み取り、それぞれの位置を音に変えて「フォト音階」を作ります。"
                       "曲調に「📷 フォト音階」が追加され、その音だけを使った作曲を楽しめます。"),
     ]),
+    ("🗂 パターンを管理する", [
+        ("パターン編集タブ", "フレーズとソングの間の専用タブ。保存したパターン (最大8) を一覧で管理します。"),
+        ("編集・名称・複製・削除", "各パターンを盤面へ読み込んで編集、名前を付ける、複製する、削除する、"
+                              "▶ で試聴する — がその場でできます。"),
+        ("★ 登録 / ＋ 保存", "気に入ったフレーズは フレーズ画面の ★ 登録、または パターン画面の空きスロットへ保存。"),
+    ]),
     ("🧩 曲を組み立てる (ソング)", [
         ("ソング自動作成", "1 曲ぶんの構成 (イントロ→Aメロ→Bメロ→アウトロ) をワンボタンで作ります。"
                          "パターン 1〜4 とソング構成が丸ごと入れ替わります。"),
-        ("パターン登録", "気に入ったフレーズを ★ で保存 (最大8個)。ソング画面のパレットに並びます。"),
-        ("配置する", "パレットでパターンを選び、下のマス目に置きます。横に連結・縦に重ねられます。"),
+        ("配置する", "パレットでパターンを選ぶと「配置中」に名前が出ます。下のマス目に置きます。"
+                   "横に連結・縦に重ねられます。マス目にはパターン名とブロック番号が出ます。"),
         ("消す", "同じマスをもう一度クリック、または右クリックで消去。"),
         ("WAV / MIDI書出", "組み立てた曲を音声ファイル (.wav) や、DAW・楽譜ソフトで開ける"
                           "標準 MIDI ファイル (.mid) に書き出せます。"),
@@ -76,11 +82,17 @@ SECTIONS_EN = [
         ("📷 From photo", "Reads rectangles (up to 8) in a photo and turns their positions into a \"photo scale\". "
                         "\"📷 Photo scale\" is added to Mood so you can compose using just those notes."),
     ]),
+    ("🗂 Manage patterns", [
+        ("Pattern editor tab", "A dedicated tab between Phrase and Song to manage saved patterns (up to 8)."),
+        ("Edit / Rename / Duplicate / Delete", "Load a pattern onto the board to edit, give it a name, "
+                                              "duplicate it, delete it, or preview with ▶ — right there."),
+        ("★ Save / ＋ Save here", "Save a phrase with ★ on the Phrase screen, or into an empty slot on the Pattern screen."),
+    ]),
     ("🧩 Build a song", [
         ("Auto song", "Builds a full arrangement (Intro→A→B→Outro) with one button. "
                       "Patterns 1-4 and the song are wholly replaced."),
-        ("Save pattern", "Save a phrase you like with ★ (up to 8). They line up in the Song palette."),
-        ("Place", "Pick a pattern from the palette and place it on the grid below. Chain horizontally, stack vertically."),
+        ("Place", "Pick a pattern from the palette — its name shows under \"Placing\" — and place it on the grid. "
+                  "Chain horizontally, stack vertically. Cells show pattern names and block numbers."),
         ("Erase", "Click the same cell again, or right-click, to erase."),
         ("Export WAV / MIDI", "Export the built song as an audio file (.wav) or a standard MIDI file (.mid) "
                              "you can open in a DAW or notation software."),
@@ -106,7 +118,7 @@ SHORTCUTS_JA = [
     ("Esc", "停止"),
     ("1〜4", "パート切替"),
     ("Ctrl+Z / Y", "元に戻す / やり直す"),
-    ("Ctrl+Tab", "フレーズ ⇄ ソング"),
+    ("Ctrl+Tab", "フレーズ → パターン → ソング"),
     ("F1", "このヘルプ"),
 ]
 
@@ -115,7 +127,7 @@ SHORTCUTS_EN = [
     ("Esc", "Stop"),
     ("1-4", "Switch part"),
     ("Ctrl+Z / Y", "Undo / Redo"),
-    ("Ctrl+Tab", "Phrase ⇄ Song"),
+    ("Ctrl+Tab", "Phrase → Patterns → Song"),
     ("F1", "This help"),
 ]
 

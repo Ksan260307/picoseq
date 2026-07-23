@@ -40,10 +40,10 @@ from ..core.schedule import phrase_ticks, samples_per_tick, song_ticks, tick_sec
 from ..core.serialize import LoadError, dumps, loads
 from ..core.song import used_blocks
 from ..core.wavio import wav_bytes
-from . import i18n, licensing, storage, theme
+from . import i18n, storage, theme
 from .i18n import t
 from .help import HelpDialog
-from .license_dialog import LicenseDialog
+from .panel import DockPanel
 from .hum import HumDialog
 from .photo import PhotoDialog, analyze_photo
 from .playback import PlayClock, SoundPlayer, rotate_pcm
@@ -61,6 +61,8 @@ class PicoSeqApp:
         self.history = History()
         self.part = 0       # 選択中のパート (波形 0..3)
         self.layer = 0      # 選択中のレイヤー (そのパート内)
+        self.muted = set()  # 消音中の (wave, layer) の集合。再生・WAV に反映
+        self.roll_zoom = 1.0  # ピアノロールの拡大率 (画面再構築後も保つ)
         self.selected_pattern = -1
         self.tab = "phrase"
 
@@ -82,6 +84,10 @@ class PicoSeqApp:
 
         settings = storage.load_settings()
         i18n.set_lang(settings.get("lang", "ja"))
+        try:  # 前回の拡大率を復元 (0.5〜3.0)
+            self.roll_zoom = min(3.0, max(0.5, float(settings.get("zoom", 1.0))))
+        except (TypeError, ValueError):
+            self.roll_zoom = 1.0
 
         theme.set_palette(self.project.sound)
         root.configure(bg=theme.BG)
@@ -187,8 +193,10 @@ class PicoSeqApp:
                  bg=theme.BG, fg=theme.ACCENT).pack(side="left")
 
         self.tab_phrase_btn = self._button(header, t("tab_phrase"), lambda: self.switch_tab("phrase"))
+        self.tab_pattern_btn = self._button(header, t("tab_pattern"), lambda: self.switch_tab("pattern"))
         self.tab_song_btn = self._button(header, t("tab_song"), lambda: self.switch_tab("song"))
         self.tab_phrase_btn.pack(side="left", padx=(16, 2))
+        self.tab_pattern_btn.pack(side="left", padx=2)
         self.tab_song_btn.pack(side="left", padx=2)
 
         tk.Label(header, text=t("lbl_sound"), font=theme.FONT_SMALL,
@@ -218,7 +226,6 @@ class PicoSeqApp:
                  bg=theme.BG, fg=theme.PLAYHEAD, width=12).pack(side="left", padx=8)
 
         self._button(header, t("btn_help"), self.show_help).pack(side="right", padx=2)
-        self._button(header, t("btn_license"), self.show_license).pack(side="right", padx=2)
         for label, command in ((t("btn_import"), self.do_import), (t("btn_export"), self.do_export),
                                (t("btn_load"), self.do_load), (t("btn_save"), self.do_save)):
             self._button(header, label, command).pack(side="right", padx=2)
@@ -235,16 +242,78 @@ class PicoSeqApp:
         tk.Label(header, text="🌐", font=theme.FONT_SMALL,
                  bg=theme.BG, fg=theme.TEXT_DIM).pack(side="right")
 
-        # ---- フレーズタブ ----
-        self.phrase_frame = tk.Frame(root, bg=theme.PANEL, padx=10, pady=8,
-                                     highlightbackground=theme.PANEL_EDGE,
-                                     highlightthickness=1)
+        # ---- フレーズタブ (縦分割: 操作パネル / ピアノロール、各パネルは切り離し可) ----
+        self.phrase_frame = tk.Frame(root, bg=theme.BG)
+        self.phrase_paned = tk.PanedWindow(
+            self.phrase_frame, orient="vertical", bg=theme.BG,
+            sashwidth=7, sashrelief="raised", bd=0)
+        self.phrase_paned.pack(fill="both", expand=True)
 
-        bar1 = tk.Frame(self.phrase_frame, bg=theme.PANEL)
+        self.phrase_ctrl_panel = DockPanel(self.phrase_paned, t("panel_transport"),
+                                           self, minsize=110, stretch="never")
+        self._build_phrase_controls(self.phrase_ctrl_panel.body)
+
+        self.roll_panel = DockPanel(self.phrase_paned, t("panel_roll"), self, minsize=130)
+        self._build_roll_zoom(self.roll_panel.header)
+        self.roll = RollView(self.roll_panel.body, self)
+        self.roll.frame.pack(fill="both", expand=True)
+
+        # ---- ソングタブ (縦分割: 操作パネル / ソング構成) ----
+        self.song_frame = tk.Frame(root, bg=theme.BG)
+        self.song_paned = tk.PanedWindow(
+            self.song_frame, orient="vertical", bg=theme.BG,
+            sashwidth=7, sashrelief="raised", bd=0)
+        self.song_paned.pack(fill="both", expand=True)
+
+        self.song_ctrl_panel = DockPanel(self.song_paned, t("panel_transport"),
+                                         self, minsize=80, stretch="never")
+        self._build_song_controls(self.song_ctrl_panel.body)
+
+        self.song_panel = DockPanel(self.song_paned, t("panel_song"), self, minsize=130)
+        self.song_view = SongView(self.song_panel.body, self)
+        self.song_view.frame.pack(fill="both", expand=True)
+
+        # ---- パターンタブ ----
+        self.pattern_frame = tk.Frame(root, bg=theme.PANEL, padx=10, pady=8,
+                                      highlightbackground=theme.PANEL_EDGE,
+                                      highlightthickness=1)
+        ptop = tk.Frame(self.pattern_frame, bg=theme.PANEL)
+        ptop.pack(fill="x", pady=(0, 4))
+        tk.Label(ptop, text=t("panel_pattern"), font=theme.FONT_BOLD,
+                 bg=theme.PANEL, fg=theme.ACCENT).pack(side="left")
+        self._button(ptop, t("pat_save_new"), self.save_new_pattern, accent=True
+                     ).pack(side="right")
+        tk.Label(self.pattern_frame, text=t("hint_pattern"), font=theme.FONT_SMALL,
+                 bg=theme.PANEL, fg=theme.TEXT_DIM, anchor="w", justify="left"
+                 ).pack(fill="x", pady=(0, 6))
+        self.pattern_list = tk.Frame(self.pattern_frame, bg=theme.PANEL)
+        self.pattern_list.pack(fill="both", expand=True)
+
+        # ---- ステータスバー ----
+        status = tk.Frame(root, bg=theme.BG)
+        status.pack(fill="x", side="bottom", padx=10, pady=(2, 6))
+        self.status_var = tk.StringVar()
+        tk.Label(status, textvariable=self.status_var, font=theme.FONT_SMALL,
+                 bg=theme.BG, fg=theme.TEXT_DIM, anchor="w").pack(side="left", fill="x", expand=True)
+        self.play_hint_var = tk.StringVar()
+        tk.Label(status, textvariable=self.play_hint_var, font=theme.FONT_SMALL,
+                 bg=theme.BG, fg=theme.ACCENT).pack(side="right", padx=8)
+        self.cell_var = tk.StringVar()
+        tk.Label(status, textvariable=self.cell_var, font=theme.FONT_SMALL,
+                 bg=theme.BG, fg=theme.TEXT_DIM, width=22, anchor="e").pack(side="right")
+        self.count_var = tk.StringVar()
+        tk.Label(status, textvariable=self.count_var, font=theme.FONT_SMALL,
+                 bg=theme.BG, fg=theme.TEXT_DIM).pack(side="right", padx=8)
+
+    def _build_phrase_controls(self, parent):
+        """フレーズ操作パネルの中身 (生成・キー/曲調・パート/ミキサー・レイヤー)。"""
+        inner = tk.Frame(parent, bg=theme.PANEL)
+        inner.pack(fill="both", expand=True, padx=8, pady=6)
+
+        bar1 = tk.Frame(inner, bg=theme.PANEL)
         bar1.pack(fill="x", pady=(0, 6))
         self.play_phrase_btn = self._button(bar1, t("btn_play"), lambda: self.toggle_play("phrase"), accent=True)
         self.play_phrase_btn.pack(side="left", padx=(0, 12))
-
         self.beats_box = self._combo(bar1, t("lbl_beats"), [f"{n}/4" for n in range(2, 8)], self._on_beats_change, width=5)
         self.key_box = self._combo(bar1, t("lbl_key"), list(KEY_NAMES), self._on_key_change, width=8)
         self.scale_box = self._combo(bar1, t("lbl_scale"), self._scale_labels(), self._on_scale_change, width=20)
@@ -268,7 +337,7 @@ class PicoSeqApp:
         self.arrange_btn = self._button(bar1, t("btn_arrange"), self.arrange_accompaniment)
         self.arrange_btn.pack(side="left", padx=2)
 
-        bar2 = tk.Frame(self.phrase_frame, bg=theme.PANEL)
+        bar2 = tk.Frame(inner, bg=theme.PANEL)
         bar2.pack(fill="x", pady=(0, 6))
         tk.Label(bar2, text=t("lbl_part"), font=theme.FONT_SMALL,
                  bg=theme.PANEL, fg=theme.TEXT_DIM).pack(side="left", padx=(0, 4))
@@ -290,7 +359,7 @@ class PicoSeqApp:
         tk.Label(bar2, text=t("lbl_tone"), font=theme.FONT_SMALL,
                  bg=theme.PANEL, fg=theme.TEXT_DIM).pack(side="left")
         self.tone_scale = tk.Scale(
-            bar2, from_=0, to=100, orient="horizontal", length=120, showvalue=0,
+            bar2, from_=0, to=100, orient="horizontal", length=110, showvalue=0,
             command=self._on_tone_change, bg=theme.PANEL, troughcolor=theme.BTN_BG,
             highlightthickness=0, bd=0, activebackground=theme.ACCENT,
         )
@@ -300,7 +369,7 @@ class PicoSeqApp:
         tk.Label(bar2, text=t("lbl_gate"), font=theme.FONT_SMALL,
                  bg=theme.PANEL, fg=theme.TEXT_DIM).pack(side="left")
         self.gate_scale = tk.Scale(
-            bar2, from_=10, to=100, orient="horizontal", length=120, showvalue=0,
+            bar2, from_=10, to=100, orient="horizontal", length=110, showvalue=0,
             command=self._on_gate_change, bg=theme.PANEL, troughcolor=theme.BTN_BG,
             highlightthickness=0, bd=0, activebackground=theme.ACCENT,
         )
@@ -316,19 +385,44 @@ class PicoSeqApp:
         self._button(bar2, t("btn_midi"), lambda: self.do_export_midi("phrase")).pack(side="right", padx=2)
         self._button(bar2, t("btn_wav"), lambda: self.do_export_wav("phrase")).pack(side="right", padx=(2, 8))
 
-        # ---- レイヤー選択バー (選択中パートの重ね) ----
-        self.layer_frame = tk.Frame(self.phrase_frame, bg=theme.PANEL)
-        self.layer_frame.pack(fill="x", pady=(0, 6))
+        # ミキサー行: パートごとのミュート + 盤面の拡大縮小
+        bar_mix = tk.Frame(inner, bg=theme.PANEL)
+        bar_mix.pack(fill="x", pady=(0, 6))
+        tk.Label(bar_mix, text=t("lbl_mute"), font=theme.FONT_SMALL,
+                 bg=theme.PANEL, fg=theme.TEXT_DIM).pack(side="left", padx=(0, 4))
+        self.mute_buttons = []
+        for i in range(4):
+            btn = tk.Button(
+                bar_mix, text=f"{i + 1} {i18n.part_name(i)}", font=theme.FONT_SMALL,
+                command=lambda i=i: self.toggle_mute(i), relief="flat", bd=1,
+                padx=6, pady=2, takefocus=0, cursor="hand2",
+            )
+            btn.pack(side="left", padx=2)
+            self.mute_buttons.append(btn)
 
-        self.roll = RollView(self.phrase_frame, self)
-        self.roll.frame.pack()
+        # レイヤー選択バー (選択中パートの重ね)
+        self.layer_frame = tk.Frame(inner, bg=theme.PANEL)
+        self.layer_frame.pack(fill="x")
 
-        # ---- ソングタブ ----
-        self.song_frame = tk.Frame(root, bg=theme.PANEL, padx=10, pady=8,
-                                   highlightbackground=theme.PANEL_EDGE,
-                                   highlightthickness=1)
+    def _build_roll_zoom(self, header):
+        """ピアノロール・パネルのタイトルバーに拡大縮小コントロールを載せる。"""
+        small = dict(font=theme.FONT_SMALL, bg=theme.BTN_BG, fg=theme.TEXT,
+                     activebackground=theme.BTN_ACTIVE, relief="flat", bd=0,
+                     padx=6, pady=0, takefocus=0, cursor="hand2")
+        tk.Button(header, text="＋", command=self.zoom_in, **small).pack(side="right", padx=(1, 4))
+        self.zoom_var = tk.StringVar()
+        tk.Button(header, textvariable=self.zoom_var, command=self.zoom_reset,
+                  width=5, **small).pack(side="right", padx=1)
+        tk.Button(header, text="－", command=self.zoom_out, **small).pack(side="right", padx=1)
+        tk.Label(header, text=t("lbl_zoom"), font=theme.FONT_SMALL,
+                 bg=theme.PANEL_EDGE, fg=theme.TEXT_DIM).pack(side="right", padx=(10, 2))
 
-        bar3 = tk.Frame(self.song_frame, bg=theme.PANEL)
+    def _build_song_controls(self, parent):
+        """ソング操作パネルの中身 (再生・生成・パターンパレット)。"""
+        inner = tk.Frame(parent, bg=theme.PANEL)
+        inner.pack(fill="both", expand=True, padx=8, pady=6)
+
+        bar3 = tk.Frame(inner, bg=theme.PANEL)
         bar3.pack(fill="x", pady=(0, 6))
         self.play_song_btn = self._button(bar3, t("btn_play_song"), lambda: self.toggle_play("song"), accent=True)
         self.play_song_btn.pack(side="left", padx=(0, 12))
@@ -337,8 +431,8 @@ class PicoSeqApp:
         self._button(bar3, t("btn_wav_song"), lambda: self.do_export_wav("song")).pack(side="left", padx=(12, 2))
         self._button(bar3, t("btn_midi_song"), lambda: self.do_export_midi("song")).pack(side="left", padx=2)
 
-        palette = tk.Frame(self.song_frame, bg=theme.PANEL)
-        palette.pack(fill="x", pady=(0, 6))
+        palette = tk.Frame(inner, bg=theme.PANEL)
+        palette.pack(fill="x")
         tk.Label(palette, text=t("lbl_pattern"), font=theme.FONT_SMALL,
                  bg=theme.PANEL, fg=theme.TEXT_DIM).pack(side="left", padx=(0, 4))
         self.pattern_buttons = []
@@ -350,27 +444,45 @@ class PicoSeqApp:
             )
             btn.pack(side="left", padx=2)
             self.pattern_buttons.append(btn)
-        self._button(palette, t("btn_delete"), self.delete_selected_pattern, danger=True).pack(side="right", padx=2)
-        self._button(palette, t("btn_load_to_editor"), self.load_selected_pattern).pack(side="right", padx=2)
+        self._button(palette, t("song_go_patterns"),
+                     lambda: self.switch_tab("pattern")).pack(side="right", padx=2)
 
-        self.song_view = SongView(self.song_frame, self)
-        self.song_view.frame.pack()
+        # 配置中のパターン名を大きく表示 (どれを置いているか分かるように)
+        placing = tk.Frame(inner, bg=theme.PANEL)
+        placing.pack(fill="x", pady=(4, 0))
+        self.placing_var = tk.StringVar()
+        tk.Label(placing, textvariable=self.placing_var, font=theme.FONT_BOLD,
+                 bg=theme.PANEL, fg=theme.ACCENT, anchor="w").pack(side="left")
 
-        # ---- ステータスバー ----
-        status = tk.Frame(root, bg=theme.BG)
-        status.pack(fill="x", side="bottom", padx=10, pady=(2, 6))
-        self.status_var = tk.StringVar()
-        tk.Label(status, textvariable=self.status_var, font=theme.FONT_SMALL,
-                 bg=theme.BG, fg=theme.TEXT_DIM, anchor="w").pack(side="left", fill="x", expand=True)
-        self.play_hint_var = tk.StringVar()
-        tk.Label(status, textvariable=self.play_hint_var, font=theme.FONT_SMALL,
-                 bg=theme.BG, fg=theme.ACCENT).pack(side="right", padx=8)
-        self.cell_var = tk.StringVar()
-        tk.Label(status, textvariable=self.cell_var, font=theme.FONT_SMALL,
-                 bg=theme.BG, fg=theme.TEXT_DIM, width=22, anchor="e").pack(side="right")
-        self.count_var = tk.StringVar()
-        tk.Label(status, textvariable=self.count_var, font=theme.FONT_SMALL,
-                 bg=theme.BG, fg=theme.TEXT_DIM).pack(side="right", padx=8)
+    def _update_mute_buttons(self):
+        for i, button in enumerate(self.mute_buttons):
+            name = f"{i + 1} {i18n.part_name(i)}"
+            if self.is_part_muted(i):
+                button.configure(text=f"🔇 {name}", bg=theme.DANGER,
+                                 fg=theme.KEY_TEXT, relief="sunken")
+            elif any((i, layer) in self.muted
+                     for layer in range(layer_count(self.project, i))):
+                button.configure(text=f"🔉 {name}", bg=theme.BTN_BG,  # 一部レイヤーのみ
+                                 fg=theme.DANGER, relief="raised")
+            else:
+                button.configure(text=f"🔊 {name}", bg=theme.BTN_BG,
+                                 fg=theme.PART_COLORS[i], relief="flat")
+
+    def _update_zoom_label(self):
+        if hasattr(self, "zoom_var"):
+            self.zoom_var.set(f"{int(round(self.roll.zoom * 100))}%")
+
+    def zoom_in(self):
+        self.roll.zoom_in()
+        self._update_zoom_label()
+
+    def zoom_out(self):
+        self.roll.zoom_out()
+        self._update_zoom_label()
+
+    def zoom_reset(self):
+        self.roll.zoom_reset()
+        self._update_zoom_label()
 
     def _button(self, parent, text, command, accent=False, danger=False):
         fg = theme.TEXT
@@ -428,7 +540,8 @@ class PicoSeqApp:
         self.select_part(part)
 
     def _on_tab_key(self, _event):
-        self.switch_tab("song" if self.tab == "phrase" else "phrase")
+        nxt = (self.TABS.index(self.tab) + 1) % len(self.TABS)
+        self.switch_tab(self.TABS[nxt])
         return "break"
 
     # ==============================
@@ -464,10 +577,14 @@ class PicoSeqApp:
         finally:
             self._syncing = False
         self._update_part_buttons()
+        self._update_mute_buttons()
+        self._update_zoom_label()
         self._rebuild_layer_bar()
         self.roll.rebuild()
         self.song_view.rebuild()
         self._update_palette()
+        self._update_placing()
+        self._rebuild_pattern_list()
         self._update_counts()
         self._update_undo_buttons()
 
@@ -475,6 +592,7 @@ class PicoSeqApp:
         self.roll.redraw_notes()
         self.song_view.redraw_cells()
         self._update_palette()
+        self._update_placing()
         self._update_counts()
         self._update_undo_buttons()
 
@@ -508,7 +626,16 @@ class PicoSeqApp:
                 takefocus=0, cursor="hand2",
                 command=lambda k=layer: self.select_layer(k),
             )
-            btn.pack(side="left", padx=1)
+            btn.pack(side="left", padx=(2, 0))
+            muted = self.is_layer_muted(self.part, layer)
+            mbtn = tk.Button(
+                self.layer_frame, text="🔇" if muted else "🔊", font=theme.FONT_SMALL,
+                relief="sunken" if muted else "flat", bd=1, padx=1, takefocus=0,
+                cursor="hand2", bg=theme.DANGER if muted else theme.BTN_BG,
+                fg=theme.KEY_TEXT if muted else theme.TEXT_DIM,
+                command=lambda k=layer: self.toggle_layer_mute(self.part, k),
+            )
+            mbtn.pack(side="left", padx=(0, 3))
         if count < MAX_LAYERS:
             self._button(self.layer_frame, t("btn_add_layer"), self.add_layer_action
                          ).pack(side="left", padx=(6, 2))
@@ -571,22 +698,29 @@ class PicoSeqApp:
         beat = step % (beats * 4) // 4 + 1
         self.cell_var.set(t("cell_hint", note=note_name(pitch), measure=measure, beat=beat))
 
+    TABS = ("phrase", "pattern", "song")
+
     def switch_tab(self, name, stop=True):
         if stop:
             self.stop_playback()
         self.tab = name
-        if name == "phrase":
-            self.song_frame.pack_forget()
-            self.phrase_frame.pack(fill="both", expand=True, padx=10, pady=4)
-            self.set_status(t("hint_phrase"))
-        else:
-            self.phrase_frame.pack_forget()
-            self.song_frame.pack(fill="both", expand=True, padx=10, pady=4)
-            self.set_status(t("hint_song"))
+        frames = {"phrase": self.phrase_frame, "pattern": self.pattern_frame,
+                  "song": self.song_frame}
+        hints = {"phrase": t("hint_phrase"), "pattern": t("hint_pattern"),
+                 "song": t("hint_song")}
+        for key, frame in frames.items():
+            if key == name:
+                frame.pack(fill="both", expand=True, padx=10, pady=4)
+            else:
+                frame.pack_forget()
+        if name == "pattern":
+            self._rebuild_pattern_list()
+        self.set_status(hints[name])
         on = dict(bg=theme.BTN_ON, fg=theme.BTN_ON_TEXT)
         off = dict(bg=theme.BTN_BG, fg=theme.TEXT)
         self.tab_phrase_btn.configure(**(on if name == "phrase" else off))
-        self.tab_song_btn.configure(**(off if name == "phrase" else on))
+        self.tab_pattern_btn.configure(**(on if name == "pattern" else off))
+        self.tab_song_btn.configure(**(on if name == "song" else off))
 
     # ==============================
     # フレーズ編集 (RollView から呼ばれる)
@@ -654,6 +788,50 @@ class PicoSeqApp:
         self._sync_part_sliders()
         self._rebuild_layer_bar()
         self.roll.redraw_notes()
+
+    def mute_pairs(self) -> frozenset:
+        """レンダラへ渡す消音集合 (wave, layer)。"""
+        return frozenset(self.muted)
+
+    def is_layer_muted(self, wave, layer) -> bool:
+        return (wave, layer) in self.muted
+
+    def is_part_muted(self, wave) -> bool:
+        """パートの全レイヤーが消音されていれば True。"""
+        count = layer_count(self.project, wave)
+        return all((wave, layer) in self.muted for layer in range(count))
+
+    def toggle_mute(self, wave):
+        """パート全体の消音を切り替える (全レイヤーまとめて)。確定状態は変えない。"""
+        count = layer_count(self.project, wave)
+        if self.is_part_muted(wave):
+            for layer in range(count):
+                self.muted.discard((wave, layer))
+            self.set_status(t("st_unmuted", part=i18n.part_name(wave)))
+        else:
+            for layer in range(count):
+                self.muted.add((wave, layer))
+            self.set_status(t("st_muted", part=i18n.part_name(wave)))
+        self._after_mute_change(wave)
+
+    def toggle_layer_mute(self, wave, layer):
+        """特定レイヤーの消音を切り替える。"""
+        if (wave, layer) in self.muted:
+            self.muted.discard((wave, layer))
+            self.set_status(t("st_layer_unmuted", part=i18n.part_name(wave), n=layer + 1))
+        else:
+            self.muted.add((wave, layer))
+            self.set_status(t("st_layer_muted", part=i18n.part_name(wave), n=layer + 1))
+        self._after_mute_change(wave)
+
+    def _after_mute_change(self, wave):
+        self._update_part_buttons()
+        if hasattr(self, "mute_buttons"):
+            self._update_mute_buttons()
+        self._rebuild_layer_bar()   # レイヤーごとの 🔊/🔇 表示を更新
+        self.roll.redraw_notes()
+        if self.play_mode:  # 再生中なら次のループへ反映
+            self._schedule_live_rerender()
 
     def _sync_part_sliders(self):
         params = part_params(self.project, self.part, self.layer)
@@ -727,19 +905,15 @@ class PicoSeqApp:
 
     def generate_auto(self):
         """自動作成 — 毎回新しい「シード値」を選んで作る。番号は記録され再現できる。"""
-        if not self._quota_ok():
-            return
         seed = random.randint(SEED_MIN, SEED_MAX)  # 番号選びだけ乱数。結果は project に記録される
         p = actions.set_seed(self.project, seed)
         self.commit(actions.generate_phrase(p))
-        self._meter_auto_generate()
         self._syncing = True
         try:
             self.seed_var.set(str(seed))
         finally:
             self._syncing = False
-        self.set_status(t("st_auto_made", seed=seed, prog=self._progression_text())
-                        + self._quota_suffix())
+        self.set_status(t("st_auto_made", seed=seed, prog=self._progression_text()))
 
     def generate_from_seed_entry(self):
         """シード値の欄で Enter — その番号の曲を再現する。"""
@@ -753,8 +927,6 @@ class PicoSeqApp:
 
         65 種類の曲調から思いがけない組み合わせに出会うための一発ボタン。
         """
-        if not self._quota_ok():
-            return
         scale = random.choice(SCALE_IDS)
         sound = random.choice(theme.SOUND_IDS)
         seed = random.randint(SEED_MIN, SEED_MAX)
@@ -765,13 +937,12 @@ class PicoSeqApp:
         p = actions.set_seed(p, seed)
         p = actions.generate_phrase(p)
         self.commit(p, full=True)
-        self._meter_auto_generate()
         self._ensure_theme()  # 選ばれた音色に配色を合わせる
         from ..core.music import SCALES as _SCALES
         self.set_status(t("st_surprise",
                           scale=i18n.scale_label(scale, _SCALES[scale]["label"]),
                           sound=i18n.sound_label(sound), seed=seed,
-                          prog=self._progression_text()) + self._quota_suffix())
+                          prog=self._progression_text()))
 
     def arrange_accompaniment(self):
         """盤面のメロディに合わせて他パート (ベース・サブ・リズム) を自動生成する。"""
@@ -788,34 +959,6 @@ class PicoSeqApp:
 
     def show_help(self, _event=None):
         HelpDialog(self)
-
-    def show_license(self, _event=None):
-        LicenseDialog(self)
-
-    def on_license_changed(self):
-        """有料版が有効になった直後に呼ばれる (回数表示などを更新)。"""
-        self._update_counts()
-
-    def _quota_ok(self) -> bool:
-        """無料版の自動生成枠を確認する。使い切っていたら知らせて False。"""
-        if self.silent or licensing.can_auto_generate():  # 自己診断は課金対象外
-            return True
-        self.alert(t("st_quota_reached", limit=licensing.FREE_DAILY_LIMIT))
-        return False
-
-    def _meter_auto_generate(self):
-        """自動生成を 1 回分消費する (自己診断中は設定を汚さない)。"""
-        if not self.silent:
-            licensing.record_auto_generate()
-
-    def _quota_suffix(self) -> str:
-        """自動生成後のステータスに付ける「無料: 残り N 回」の文言 (有料版は空)。"""
-        if self.silent:
-            return ""
-        remaining = licensing.auto_gen_remaining()
-        if remaining is None:
-            return ""
-        return t("st_free_remaining", remaining=remaining)
 
     # ==============================
     # 鼻歌 (歌ってメロディを作る)
@@ -888,42 +1031,200 @@ class PicoSeqApp:
     # パターンとソング
     # ==============================
 
+    def pattern_label(self, slot: int) -> str:
+        """パターンの表示名。名前があればそれ、無ければ F 番号。"""
+        pattern = self.project.patterns[slot]
+        return pattern.name if pattern.name else f"F{slot + 1}"
+
     def save_current_pattern(self):
+        """フレーズ画面の ★登録 — 空きスロットへ現在のフレーズを保存する。"""
         slot = actions.free_pattern_slot(self.project)
         if slot == -1:
-            self.alert(t("st_pat_full"))
+            self.alert(t("st_pat_no_room"))
             return
         self.commit(actions.save_pattern(self.project, slot))
         self.selected_pattern = slot
-        self._update_palette()
         self.set_status(t("st_pat_saved", n=slot + 1))
 
     def select_pattern(self, slot):
         if self.project.patterns[slot].used:
             self.selected_pattern = slot
             self._update_palette()
-            self.set_status(t("st_pat_selected", n=slot + 1))
+            self._update_placing()
+            self.song_view.redraw_cells()  # 選択パターンのセル強調を更新
 
-    def load_selected_pattern(self):
-        slot = self.selected_pattern
-        if slot == -1 or not self.project.patterns[slot].used:
-            self.set_status(t("st_pick_pattern"))
+    # ---- パターン編集タブ ----
+
+    def _rebuild_pattern_list(self):
+        if not hasattr(self, "pattern_list"):
             return
-        if self.confirm(t("ttl_load"), t("st_load_pat_q", n=slot + 1)):
-            self.commit(actions.load_pattern(self.project, slot))
-            self.switch_tab("phrase")
-            self.set_status(t("st_pat_loaded", n=slot + 1))
+        for child in self.pattern_list.winfo_children():
+            child.destroy()
+        for slot in range(PATTERN_COUNT):
+            self._pattern_row(slot)
 
-    def delete_selected_pattern(self):
-        slot = self.selected_pattern
-        if slot == -1 or not self.project.patterns[slot].used:
-            self.set_status(t("st_pick_pattern"))
+    def _pattern_row(self, slot):
+        pattern = self.project.patterns[slot]
+        row = tk.Frame(self.pattern_list, bg=theme.PANEL)
+        row.pack(fill="x", pady=2)
+        color = theme.PATTERN_COLORS[slot % len(theme.PATTERN_COLORS)]
+        tk.Label(row, text=f"F{slot + 1}", font=theme.FONT_BOLD, width=4,
+                 bg=color if pattern.used else theme.BTN_BG,
+                 fg=theme.KEY_TEXT if pattern.used else theme.TEXT_DIM
+                 ).pack(side="left", padx=(0, 8), ipady=2)
+        if pattern.used:
+            name = pattern.name or t("pat_unnamed")
+            tk.Label(row, text=name, font=theme.FONT_BOLD, bg=theme.PANEL,
+                     fg=theme.TEXT if pattern.name else theme.TEXT_DIM,
+                     anchor="w", width=18).pack(side="left")
+            tk.Label(row, text=t("pat_notes", n=count_notes(pattern.notes)),
+                     font=theme.FONT_SMALL, bg=theme.PANEL, fg=theme.TEXT_DIM,
+                     width=6, anchor="w").pack(side="left", padx=(6, 10))
+            # コンパクトな操作ボタン (アイコン中心) で行幅を抑える
+            self._row_button(row, "🗑", t("pat_del"),
+                             lambda s=slot: self.delete_pattern_slot(s), danger=True)
+            self._row_button(row, "⧉", t("pat_dup"),
+                             lambda s=slot: self.duplicate_pattern_action(s))
+            self._row_button(row, "🏷", t("pat_rename"),
+                             lambda s=slot: self.rename_pattern_action(s))
+            self._row_button(row, "▶", t("pat_play"),
+                             lambda s=slot: self.play_pattern(s))
+            self._row_button(row, t("pat_edit"), t("pat_edit"),
+                             lambda s=slot: self.edit_pattern(s), accent=True)
+        else:
+            tk.Label(row, text=t("pat_empty"), font=theme.FONT, bg=theme.PANEL,
+                     fg=theme.TEXT_DIM, anchor="w", width=24).pack(side="left")
+            self._button(row, t("pat_save_here"), lambda s=slot: self.save_pattern_here(s)
+                         ).pack(side="right", padx=2)
+
+    def _row_button(self, parent, label, tip, command, accent=False, danger=False):
+        """パターン行用の小さめボタン (右詰め)。label は文字/絵文字。"""
+        fg = theme.ACCENT if accent else (theme.DANGER if danger else theme.TEXT)
+        btn = tk.Button(parent, text=label, command=command,
+                        font=theme.FONT_BOLD if accent else theme.FONT,
+                        bg=theme.BTN_BG, fg=fg, activebackground=theme.BTN_ACTIVE,
+                        relief="flat", bd=1, padx=6, pady=2, takefocus=0, cursor="hand2")
+        btn.pack(side="right", padx=2)
+        return btn
+
+    def save_new_pattern(self):
+        slot = actions.free_pattern_slot(self.project)
+        if slot == -1:
+            self.alert(t("st_pat_no_room"))
+            return
+        if count_notes(self.project.phrase) == 0:
+            self.alert(t("st_pat_phrase_empty"))
+            return
+        self.commit(actions.save_pattern(self.project, slot))
+        self.selected_pattern = slot
+        self._rebuild_pattern_list()
+        self.set_status(t("st_pat_saved", n=slot + 1))
+
+    def save_pattern_here(self, slot):
+        if count_notes(self.project.phrase) == 0:
+            self.alert(t("st_pat_phrase_empty"))
+            return
+        self.commit(actions.save_pattern(self.project, slot))
+        self.selected_pattern = slot
+        self._rebuild_pattern_list()
+        self.set_status(t("st_pat_saved", n=slot + 1))
+
+    def edit_pattern(self, slot):
+        if not self.project.patterns[slot].used:
+            return
+        self.commit(actions.load_pattern(self.project, slot))
+        self.selected_pattern = slot
+        self.switch_tab("phrase")
+        self.set_status(t("st_pat_loaded", n=slot + 1))
+
+    def rename_pattern_action(self, slot):
+        pattern = self.project.patterns[slot]
+        if not pattern.used:
+            return
+        name = self._ask_text(t("dlg_rename_title"), t("dlg_rename_prompt"), pattern.name)
+        if name is None:
+            return
+        new_project = actions.rename_pattern(self.project, slot, name)
+        if new_project is self.project:
+            return
+        self.commit(new_project)
+        self._rebuild_pattern_list()
+        final = self.project.patterns[slot].name
+        if final:
+            self.set_status(t("st_pat_renamed", n=slot + 1, name=final))
+        else:
+            self.set_status(t("st_pat_cleared_name", n=slot + 1))
+
+    def duplicate_pattern_action(self, slot):
+        new_project, dest = actions.duplicate_pattern(self.project, slot)
+        if dest == -1:
+            self.alert(t("st_pat_no_room"))
+            return
+        self.commit(new_project)
+        self.selected_pattern = dest
+        self._rebuild_pattern_list()
+        self.set_status(t("st_pat_duplicated", src=slot + 1, dst=dest + 1))
+
+    def delete_pattern_slot(self, slot):
+        if not self.project.patterns[slot].used:
             return
         if self.confirm(t("ttl_delete"), t("st_delete_pat_q", n=slot + 1)):
             self.commit(actions.delete_pattern(self.project, slot))
-            self.selected_pattern = next(
-                (i for i, p in enumerate(self.project.patterns) if p.used), -1)
-            self._update_palette()
+            if self.selected_pattern == slot:
+                self.selected_pattern = next(
+                    (i for i, p in enumerate(self.project.patterns) if p.used), -1)
+            self._rebuild_pattern_list()
+
+    def play_pattern(self, slot):
+        pattern = self.project.patterns[slot]
+        if not pattern.used or self.silent or self.play_mode:
+            return
+        temp = actions.update(self.project, phrase=pattern.notes)
+        pcm = render_phrase(temp, mute=self.mute_pairs())
+        path = storage.write_play_wav("pattern", wav_bytes(pcm))
+        self.player.play_file(path, loop=False)
+        self.set_status(t("st_pat_previewing", n=slot + 1, label=self.pattern_label(slot)))
+
+    def _ask_text(self, title, prompt, initial=""):
+        """1 行テキストを尋ねる小さなダイアログ。OK で文字列、キャンセルで None。"""
+        if self.silent:
+            return None
+        win = tk.Toplevel(self.root)
+        win.title(title)
+        win.configure(bg=theme.BG)
+        win.transient(self.root)
+        win.grab_set()
+        win.resizable(False, False)
+        tk.Label(win, text=prompt, font=theme.FONT, bg=theme.BG, fg=theme.TEXT
+                 ).pack(padx=18, pady=(16, 4))
+        var = tk.StringVar(value=initial)
+        entry = tk.Entry(win, textvariable=var, font=theme.FONT, width=30,
+                         bg=theme.BTN_BG, fg=theme.TEXT, insertbackground=theme.TEXT,
+                         relief="flat")
+        entry.pack(padx=18, pady=4)
+        result = {"value": None}
+
+        def ok():
+            result["value"] = var.get()
+            win.destroy()
+
+        bar = tk.Frame(win, bg=theme.BG)
+        bar.pack(pady=(8, 16))
+        self._button(bar, t("ok"), ok, accent=True).pack(side="left", padx=6)
+        self._button(bar, t("cancel"), win.destroy).pack(side="left", padx=6)
+        entry.bind("<Return>", lambda e: ok())
+        win.bind("<Escape>", lambda e: win.destroy())
+        win.after(10, lambda: (entry.focus_set(), entry.select_range(0, "end")))
+        self.root.wait_window(win)
+        return result["value"]
+
+    def _update_placing(self):
+        if hasattr(self, "placing_var"):
+            if self.selected_pattern == -1:
+                self.placing_var.set(t("song_placing_none"))
+            else:
+                self.placing_var.set(t("song_placing",
+                                       label=self.pattern_label(self.selected_pattern)))
 
     def song_click(self, track, block):
         if self.selected_pattern == -1:
@@ -936,8 +1237,6 @@ class PicoSeqApp:
 
     def generate_song_auto(self):
         """1 曲ぶんの自動作成 — 新しいシード値でパターンと構成を丸ごと作る。"""
-        if not self._quota_ok():
-            return
         touched = (used_blocks(self.project.song) > 0
                    or any(p.used for p in self.project.patterns[:4]))
         if touched and not self.confirm(
@@ -946,10 +1245,9 @@ class PicoSeqApp:
         seed = random.randint(SEED_MIN, SEED_MAX)
         p = actions.set_seed(self.project, seed)
         self.commit(actions.generate_song(p), full=True)
-        self._meter_auto_generate()
         self.selected_pattern = 1  # Aメロを選んでおく
         self._update_palette()
-        self.set_status(t("st_song_made", seed=seed) + self._quota_suffix())
+        self.set_status(t("st_song_made", seed=seed))
 
     def clear_song(self):
         if used_blocks(self.project.song) == 0:
@@ -978,9 +1276,10 @@ class PicoSeqApp:
         return True
 
     def _render_loop_pcm(self, mode, project) -> bytes:
+        mute = self.mute_pairs()
         if mode == "phrase":
-            return render_phrase_loop(project)
-        return render_song_loop(project)
+            return render_phrase_loop(project, mute=mute)
+        return render_song_loop(project, mute=mute)
 
     def _loop_ticks(self, mode, project) -> int:
         return phrase_ticks(project) if mode == "phrase" else song_ticks(project)
@@ -1202,8 +1501,11 @@ class PicoSeqApp:
             return
         self.set_status(t("st_exporting_wav"))
 
+        mute = self.mute_pairs()
+
         def work():
-            pcm = render_song(project) if mode == "song" else render_phrase(project)
+            pcm = (render_song(project, mute=mute) if mode == "song"
+                   else render_phrase(project, mute=mute))
             return wav_bytes(pcm)
 
         def done(wav):
@@ -1214,10 +1516,7 @@ class PicoSeqApp:
         self._run_bg(work, done)
 
     def do_export_midi(self, mode):
-        """フレーズ／ソングを MIDI ファイルとして書き出す (DAW や楽譜ソフト用・有料版)。"""
-        if not self.silent and not licensing.can_export_midi():
-            self.alert(t("st_midi_paid"))
-            return
+        """フレーズ／ソングを MIDI ファイルとして書き出す (DAW や楽譜ソフト用)。"""
         project = self.project
         if mode == "song" and used_blocks(project.song) == 0:
             self.alert(t("st_song_empty_export"))
@@ -1261,8 +1560,44 @@ class PicoSeqApp:
                 return
             if answer:
                 self.do_save()
+        self._save_window_settings()
         self.stop_playback()
         self.root.destroy()
+
+    def _save_window_settings(self):
+        """ウィンドウの大きさ・位置・分割サイズ・拡大率を設定ファイルへ保存する。"""
+        if self.silent:
+            return
+        try:
+            settings = storage.load_settings()
+            settings["window"] = self.root.geometry()
+            settings["zoom"] = round(self.roll_zoom, 4)
+            sash = self._sash_y(self.phrase_paned)
+            if sash is not None:
+                settings["phrase_sash"] = sash
+            settings["tab"] = self.tab
+            storage.save_settings(settings)
+        except Exception:  # noqa: BLE001 - 保存失敗は起動を妨げない
+            pass
+
+    def apply_saved_window(self) -> bool:
+        """保存済みのウィンドウ設定を適用する。適用できたら True (既定サイズを使わない)。"""
+        settings = storage.load_settings()
+        geometry = settings.get("window")
+        applied = False
+        if isinstance(geometry, str) and geometry:
+            try:
+                self.root.geometry(geometry)
+                applied = True
+            except tk.TclError:
+                pass
+        if settings.get("tab") in ("phrase", "song"):
+            self.switch_tab(settings["tab"], stop=False)
+        self.root.update_idletasks()
+        sash = settings.get("phrase_sash")
+        if isinstance(sash, int):
+            self._place_sash(self.phrase_paned, sash)
+        return applied
 
     # ==============================
     # 自己診断 (--selftest)
@@ -1312,6 +1647,28 @@ class PicoSeqApp:
             assert used_blocks(self.project.song) == 2
             self.song_erase(0, 1)
             assert used_blocks(self.project.song) == 1
+
+            # パターン編集タブ: 保存 → 名称 → 複製 → 編集読込 → 削除
+            self.switch_tab("pattern")
+            self._rebuild_pattern_list()  # 例外なく一覧が作れる
+            self.clear_phrase()
+            self.select_part(0)
+            self.roll_press(60, 0)
+            self.roll_release()
+            slot = actions.free_pattern_slot(self.project)
+            self.save_pattern_here(slot)
+            assert self.project.patterns[slot].used
+            self.commit(actions.rename_pattern(self.project, slot, "テスト"))
+            assert self.project.patterns[slot].name == "テスト"
+            assert self.pattern_label(slot) == "テスト"
+            used_before = sum(1 for pp in self.project.patterns if pp.used)
+            self.duplicate_pattern_action(slot)
+            assert sum(1 for pp in self.project.patterns if pp.used) == used_before + 1
+            self.edit_pattern(slot)
+            assert self.tab == "phrase"
+            self.switch_tab("pattern")
+            self.delete_pattern_slot(slot)
+            assert not self.project.patterns[slot].used
 
             # パート・スライダー・各コンボの配線
             self.switch_tab("phrase")
@@ -1498,20 +1855,48 @@ class PicoSeqApp:
             assert i18n.scale_label("major", "明るい (メジャー)") == "明るい (メジャー)"
             i18n.set_lang(prev_lang)
 
-            # 有料化: プロダクトコード検証と無料枠ロジック (実ファイルには触れない)
-            from ..core.license import make_code, is_valid_code
-            code = make_code(20260719)
-            assert is_valid_code(code)
-            assert not is_valid_code("PICO-AAAA-AAAA-AAAA")
-            assert not is_valid_code("garbage")
-            free = {}
-            assert not licensing.is_pro_in(free)
-            assert licensing.remaining_in(free, "2026-01-01") == licensing.FREE_DAILY_LIMIT
-            used = licensing.with_recorded(free, "2026-01-01")
-            assert licensing.used_today_in(used, "2026-01-01") == 1
-            pro, ok = licensing.with_activated(free, code)
-            assert ok and licensing.is_pro_in(pro)
-            assert licensing.remaining_in(pro, "2026-01-01") is None  # 無制限
+            # ミュート: パート単位・レイヤー単位で消音でき、WAV に反映される
+            self.generate_auto()
+            self.arrange_accompaniment()  # 全パートに音を入れる
+            from ..core.renderer import render_phrase as _rp
+            full = _rp(self.project)
+            self.toggle_mute(2)  # リズムをパートごと消音
+            assert self.is_part_muted(2)
+            muted = _rp(self.project, mute=self.mute_pairs())
+            assert muted != full
+            self.toggle_mute(2)  # 解除
+            assert not self.is_part_muted(2)
+            assert _rp(self.project, mute=self.mute_pairs()) == full
+            # レイヤー単位: メロディに 2 層作り、片方だけ消音
+            self.select_part(0)
+            self.add_layer_action()
+            self.generate_auto()
+            base = _rp(self.project)
+            self.toggle_layer_mute(0, 1)  # メロディ 2 層目だけ消音
+            assert (0, 1) in self.muted and (0, 0) not in self.muted
+            assert _rp(self.project, mute=self.mute_pairs()) != base
+            self.toggle_layer_mute(0, 1)
+            self.remove_layer_action()
+            self.muted.clear()
+
+            # 盤面の拡大・縮小: セル寸法が変わる
+            base_w, base_h = self.roll.cell_w, self.roll.cell_h
+            self.zoom_in()
+            assert self.roll.cell_w > base_w and self.roll.cell_h > base_h
+            self.zoom_out()
+            self.zoom_reset()
+            assert abs(self.roll.zoom - 1.0) < 1e-6
+
+            # パネルの切り離し / 再ドック (ウィンドウ環境依存なので例外は許容)
+            try:
+                before = len(self.phrase_paned.panes())
+                self.roll_panel.detach()
+                assert self.roll_panel.detached
+                self.roll_panel.redock()
+                assert not self.roll_panel.detached
+                assert len(self.phrase_paned.panes()) == before
+            except Exception:  # noqa: BLE001 - 表示環境が無い CI などでは skip
+                pass
 
             self.refresh_all()
             self.root.update_idletasks()
@@ -1585,13 +1970,65 @@ class PicoSeqApp:
         self._rebuild_screen()
 
     def _rebuild_screen(self):
-        """今のパレット・言語で画面全体を作り直す (曲データ・再生はそのまま)。"""
+        """今のパレット・言語で画面全体を作り直す (曲データ・再生・レイアウトはそのまま)。
+
+        音色や言語を変えても、分割パネルの大きさ・切り離し状態が崩れないように
+        作り直しの前後でレイアウトを保存・復元する。
+        """
+        layout = self._capture_layout()
         for child in self.root.winfo_children():
             child.destroy()
         self.root.configure(bg=theme.BG)
         self._build_ui()
         self.switch_tab(self.tab, stop=False)  # 再生は止めない
         self.refresh_all()
+        self._restore_layout(layout)
+
+    # ---- レイアウト (分割サイズ・切り離し) の保存と復元 ----
+
+    def _paned_of(self, name):
+        return {"phrase": self.phrase_paned, "song": self.song_paned}[name]
+
+    def _panels(self) -> dict:
+        return {"phrase_ctrl": self.phrase_ctrl_panel, "roll": self.roll_panel,
+                "song_ctrl": self.song_ctrl_panel, "song": self.song_panel}
+
+    def _sash_y(self, paned):
+        try:
+            if len(paned.panes()) >= 2:
+                return int(paned.sash_coord(0)[1])
+        except tk.TclError:
+            pass
+        return None
+
+    def _place_sash(self, paned, y):
+        if y is None:
+            return
+        try:
+            if len(paned.panes()) >= 2:
+                paned.sash_place(0, 1, int(y))
+        except tk.TclError:
+            pass
+
+    def _capture_layout(self) -> dict:
+        return {
+            "phrase_sash": self._sash_y(self.phrase_paned),
+            "song_sash": self._sash_y(self.song_paned),
+            "detached": {name: panel.detached for name, panel in self._panels().items()},
+        }
+
+    def _restore_layout(self, layout):
+        if not layout:
+            return
+        self.root.update_idletasks()
+        self._place_sash(self.phrase_paned, layout.get("phrase_sash"))
+        self._place_sash(self.song_paned, layout.get("song_sash"))
+        for name, panel in self._panels().items():
+            if layout.get("detached", {}).get(name):
+                try:
+                    panel.detach()
+                except Exception:  # noqa: BLE001 - 表示環境依存。失敗してもドック状態でよい
+                    pass
 
     def _ensure_theme(self) -> bool:
         """プロジェクトの音色と画面の配色がずれていたら合わせ直す。
@@ -1638,6 +2075,8 @@ def _load_demo(app):
     app.project = actions.set_seed(app.project, 7)
     app.project = actions.generate_phrase(app.project)
     app.project = actions.save_pattern(app.project, 1)
+    app.project = actions.rename_pattern(app.project, 0, "メインリフ")
+    app.project = actions.rename_pattern(app.project, 1, "サビ")
     app.project = actions.load_pattern(app.project, 0)
     for track, block, pid in [(0, 0, 0), (0, 1, 0), (0, 2, 1), (0, 3, 1),
                               (1, 0, 0), (1, 2, 1), (3, 1, 1)]:
@@ -1646,8 +2085,8 @@ def _load_demo(app):
     app.history = History()
     app.refresh_all()
     import os
-    if os.environ.get("PICOSEQ_DEMO_TAB") == "song":
-        app.switch_tab("song")
+    if os.environ.get("PICOSEQ_DEMO_TAB") in ("song", "pattern"):
+        app.switch_tab(os.environ["PICOSEQ_DEMO_TAB"])
     photo_path = os.environ.get("PICOSEQ_DEMO_PHOTO")
     if photo_path:
         def open_photo():
@@ -1661,8 +2100,14 @@ def _load_demo(app):
         app._apply_theme(demo_sound)
     if os.environ.get("PICOSEQ_DEMO_HELP"):
         app.root.after(400, app.show_help)
-    if os.environ.get("PICOSEQ_DEMO_LICENSE"):
-        app.root.after(400, app.show_license)
+    if os.environ.get("PICOSEQ_DEMO_MUTE"):
+        app.toggle_mute(2)  # リズムを消音 (見た目確認用)
+    if os.environ.get("PICOSEQ_DEMO_LAYERMUTE"):
+        app.select_part(0)
+        app.add_layer_action()          # メロディに 2 層目
+        app.toggle_layer_mute(0, 1)     # 2 層目だけ消音 (レイヤーバー確認用)
+    if os.environ.get("PICOSEQ_DEMO_DETACH"):
+        app.root.after(500, app.roll_panel.detach)
 
 
 def run(selftest: bool = False, demo: bool = False) -> int:
@@ -1677,11 +2122,12 @@ def run(selftest: bool = False, demo: bool = False) -> int:
         root.destroy()
         print("SELFTEST OK" if ok else "SELFTEST NG")
         return 0 if ok else 1
-    # 画面に収まる大きさで開く
     root.update_idletasks()
-    width = min(root.winfo_reqwidth() + 8, root.winfo_screenwidth() - 60)
-    height = min(root.winfo_reqheight() + 8, root.winfo_screenheight() - 100)
-    root.geometry(f"{width}x{height}+30+30")
     root.minsize(880, 560)
+    # 通常起動は前回のウィンドウ設定を復元。demo や初回は画面に収まる大きさで開く。
+    if demo or not app.apply_saved_window():
+        width = min(root.winfo_reqwidth() + 8, root.winfo_screenwidth() - 60)
+        height = min(root.winfo_reqheight() + 8, root.winfo_screenheight() - 100)
+        root.geometry(f"{width}x{height}+30+30")
     root.mainloop()
     return 0

@@ -11,6 +11,12 @@ Place notes on a grid to build a song — or start from a photo or your own humm
 - Four parts (melody / bass / rhythm / sub)
 - **🧅 Layers per part** — stack up to 8 layers per part via "＋ Add". Give each layer its own
   tone and notes for harmonies and thickness; ✨ Auto fills every layer too (up to 32 voices)
+- **🔇 Mute (per part or per layer)** — toggle mute for a whole part or an individual layer;
+  applies to playback and WAV export (never changes the saved state)
+- **🔍 Zoom the board** — zoom the piano roll in/out (the － / ＋ in its header, or Ctrl+wheel);
+  cell width and height scale together, with horizontal scrolling when zoomed in
+- **🪟 Resizable, detachable layout** — each panel (Controls, Piano roll, Song) resizes by dragging
+  the divider, and "⧉ Detach" pops it out into its own window
 - **🌐 Japanese / English** — switch the display language with 🌐 at the top-right; the choice is remembered
 - **🎹 Sound sets** — "Chiptune 8-bit", "Mellow 16-bit", and "Crystal 32-bit".
   Switching also re-skins the whole interface to match
@@ -23,7 +29,10 @@ Place notes on a grid to build a song — or start from a photo or your own humm
   functional harmony (tonic / subdominant / dominant); the one used (e.g. Am→F→C→G) is shown after generating
 - **🎲 Surprise me** — randomizes mood, sound set, and seed for a one-click reveal, so you stumble
   onto unexpected combinations from all 65 moods
-- **🎼 Auto-song** — generates a whole intro → A → B → outro song structure in one click
+- **🎼 Auto-song** — generates a whole Intro → A → B → Outro song structure in one click
+  (each pattern gets a default name: Intro / A / B / Outro)
+- **🗂 Pattern editor tab** — a dedicated tab between Phrase and Song to manage saved patterns
+  (up to 8): load onto the board (edit), rename, duplicate, delete, preview
 - **🎤 From humming** — sing into the microphone and PicoSeq turns your pitch into a melody
   (YIN-style pitch detection that resists octave errors even on harmonic-rich voices)
 - **🎸 Auto-accompany** — draw only a melody and matching bass, drums, and backing are generated
@@ -36,21 +45,7 @@ Place notes on a grid to build a song — or start from a photo or your own humm
   notation software (parts split across MIDI channels)
 - Audio is synthesized with integer math only, so the same project produces a bit-identical WAV on any machine
 - Runs on the Python standard library alone — nothing to install
-
-### Free vs. paid
-
-The free version already covers almost everything — phrase editing, playback, WAV export.
-Entering a product code unlocks the paid version (from **🔑 License** at the top-right).
-
-| | Free | Paid |
-| --- | --- | --- |
-| ✨ Auto / 🎲 Surprise / 🎼 Auto-song | up to 100 per day (combined) | unlimited |
-| 🎧 WAV export | ✓ | ✓ |
-| 🎹 MIDI export | — | ✓ |
-| All other editing & playback | ✓ | ✓ |
-
-The daily auto-generation count resets when the date changes. Product codes are validated
-offline (`picoseq/core/license.py`) — there is no server communication.
+- Window size/position, panel split sizes, zoom level, and language are restored on the next launch
 
 Optional extras: `numpy` (faster rendering) and `Pillow` (JPEG photos).
 Everything works without them (PNG / BMP / PPM decoders are built in).
@@ -104,6 +99,11 @@ and also uploads a Windows exe on tags.
 - Switch parts with the part buttons or keys `1`–`4`
 - **Layers** — use "＋ Add" below the parts to stack layers (up to 8 per part); select a layer by
   number, delete layers 2+ with "✕ N". Each layer has its own tone and notes
+- **Mute** — 🔊/🔇 in the "Mute" row toggles a whole part; 🔊/🔇 in the layer bar toggles one layer.
+  A part with only some layers muted shows 🔉. Applies to playback and WAV
+- **Zoom** — the － / 100% / ＋ in the Piano roll header, or Ctrl+wheel over the board
+- **Panels** — drag the divider between "Controls" and "Piano roll" to resize; "⧉ Detach" pops a
+  panel into its own window, "⧈ Dock" returns it
 - Shape each part (layer)'s sound with the *tone* and *length* sliders
 - **✨ Auto-compose** — each press picks a fresh seed value; type a number and press Enter to recreate that exact tune
 - **🎤 From humming** — record 6 seconds (or open a WAV file) to extract a melody
@@ -128,11 +128,20 @@ Conversion rules (the same photo always gives the same result):
 
 The imported scale stays available in the mood selector as *📷 Photo Scale*.
 
+**Pattern editor tab**
+
+- A dedicated screen (between Phrase and Song) to manage saved patterns (up to 8)
+- Each pattern: **✏ Edit** (load onto the board), **🏷 Rename**, **⧉ Duplicate**, **🗑 Delete**, **▶ Play**
+- Use "＋ Save here" on an empty slot to store the current phrase
+- Names you set also appear on the Song grid cells
+
 **Song tab**
 
-- **✨ Auto-song** — generates patterns 1–4 (intro / A / B / outro) and the full
+- **✨ Auto-song** — generates patterns 1–4 (Intro / A / B / Outro) and the full
   16-block arrangement in one click; press ▶ to hear a complete piece
-- Pick a pattern from the palette and place it on the 4-track × 16-block grid
+- Pick a pattern from the palette — "Placing: name" shows which — then place it on the 4-track × 16-block grid
+- Cells show the **pattern name** (or F-number) with **block numbers** along the top;
+  cells matching the pattern you're placing are highlighted with a bright border
 - Horizontal = sequence, vertical = play together
 - *WAV export* renders the whole song to an audio file
 
@@ -152,7 +161,7 @@ The imported scale stays available in the mood selector as *📷 Photo Scale*.
 | `Space` / `Esc` | Play & stop / stop |
 | `1`–`4` | Switch part |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
-| `Ctrl+Tab` | Phrase ⇄ Song tab |
+| `Ctrl+Tab` | Cycle Phrase → Patterns → Song |
 | `F1` | Help |
 
 ## Under the hood (for developers)
@@ -184,7 +193,6 @@ picoseq/
 │   │   ├── wavio.py       WAV encoding
 │   │   ├── midiio.py      standard MIDI file export (split per layer)
 │   │   ├── serialize.py   versioned JSON save files + legacy migration
-│   │   ├── license.py     offline product-code validation (pure functions)
 │   │   └── history.py     undo / redo
 │   ├── vision/            photo scale (image analysis)
 │   │   ├── image.py       image loading (built-in PNG/BMP/PPM decoders)
@@ -193,17 +201,16 @@ picoseq/
 │   │   └── __main__.py    CLI inspector
 │   └── ui/                screen (state changes only via actions)
 │       ├── app.py         wiring, live re-rendering
-│       ├── roll_view.py   piano roll
+│       ├── panel.py       detachable dock panels (wm manage/forget)
+│       ├── roll_view.py   piano roll (zoom + horizontal scroll)
 │       ├── song_view.py   song grid
 │       ├── photo.py       photo-scale dialog
 │       ├── hum.py         humming dialog
 │       ├── mic.py         microphone recording (native Windows API)
 │       ├── help.py        help screen (JP/EN)
 │       ├── i18n.py        display language (Japanese / English)
-│       ├── licensing.py   free-tier tracking + product-code storage
-│       ├── license_dialog.py  license screen
 │       ├── playback.py    playback, position clock, mid-loop restart
-│       ├── storage.py     file locations + app settings (language, license)
+│       ├── storage.py     file locations + app settings (language, zoom, window)
 │       └── theme.py       colors and fonts
 └── tests/                 test suite (py -m unittest)
 ```

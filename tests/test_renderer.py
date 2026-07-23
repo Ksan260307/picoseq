@@ -181,6 +181,61 @@ class TestBackendEquivalence(unittest.TestCase):
         self.assertEqual(clip_to_pcm(py), clip_to_pcm(np_pcm))
 
 
+class TestMute(unittest.TestCase):
+    """ミュート — 消音した (パート, レイヤー) の音だけが消え、他は不変。"""
+
+    def _multi_part_project(self):
+        p = _seed42_project()
+        return actions.arrange_accompaniment(p)  # 4 パートすべてに音が入る (各 1 層)
+
+    def test_mute_removes_only_that_part(self):
+        p = self._multi_part_project()
+        from picoseq.core.schedule import phrase_events, phrase_ticks
+        events = phrase_events(p)
+        waves = {e.wave for e in events}
+        self.assertEqual(waves, {0, 1, 2, 3})  # 前提: 全パートに音がある
+
+        full = render_phrase(p)
+        muted_rhythm = render_phrase(p, mute={(2, 0)})
+        self.assertNotEqual(full, muted_rhythm)
+
+        # リズム (wave 2, layer 0) だけを抜いたイベントの描画と一致する
+        kept = [e for e in events if (e.wave, e.layer) != (2, 0)]
+        expected = clip_to_pcm(render_events(
+            kept, p.bpm, p.parts, phrase_ticks(p), sound=p.sound))
+        self.assertEqual(muted_rhythm, expected)
+
+    def test_mute_all_is_silence(self):
+        p = self._multi_part_project()
+        pcm = render_phrase(p, mute={(0, 0), (1, 0), (2, 0), (3, 0)})
+        self.assertEqual(pcm, b"\x00" * len(pcm))
+
+    def test_no_mute_matches_default(self):
+        p = self._multi_part_project()
+        self.assertEqual(render_phrase(p), render_phrase(p, mute=set()))
+
+    def test_mute_is_deterministic(self):
+        p = self._multi_part_project()
+        self.assertEqual(render_song_loop(p, mute={(1, 0), (3, 0)}),
+                         render_song_loop(p, mute={(1, 0), (3, 0)}))
+
+    def test_layer_mute_targets_one_layer(self):
+        """メロディに 2 層作り、片方だけ消音すると出力が変わり、両方消すと更に変わる。"""
+        from picoseq.core.constants import WAVE_PULSE
+        p = _seed42_project()
+        p = actions.add_layer(p, WAVE_PULSE)          # メロディに 2 層目
+        p = actions.generate_phrase(p)                # 両層に音が入る
+        from picoseq.core.schedule import phrase_events
+        layers = {e.layer for e in phrase_events(p) if e.wave == WAVE_PULSE}
+        self.assertIn(1, layers)                      # 前提: 2 層目にも音がある
+
+        full = render_phrase(p)
+        one = render_phrase(p, mute={(WAVE_PULSE, 1)})
+        both = render_phrase(p, mute={(WAVE_PULSE, 0), (WAVE_PULSE, 1)})
+        self.assertNotEqual(full, one)
+        self.assertNotEqual(one, both)
+
+
 class TestVoiceCache(unittest.TestCase):
     def test_cache_preserves_output(self):
         p = _seed42_project()

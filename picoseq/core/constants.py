@@ -1,8 +1,11 @@
 """共通定数 — データ形式の上限値とパート定義。"""
 
 APP_ID = "picoseq"
-# v2: progression / v3: custom_scale / v4: sound / v5: パートのレイヤー (複数化)
-SCHEMA_VERSION = 5
+# v2: progression / v3: custom_scale / v4: sound / v5: パートのレイヤー / v6: パターン名
+SCHEMA_VERSION = 6
+
+# パターン名の最大文字数
+PATTERN_NAME_MAX = 24
 
 # 音色セット (シンセの性格)。UI での表示名は theme 側で持つ
 SOUND_SETS = ("retro8", "warm16", "clear32")

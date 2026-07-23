@@ -334,7 +334,11 @@ def generate_song(project: Project) -> Project:
     buffers, layout = write_song(project.beats, project.key, project.scale,
                                  project.seed, project.progression,
                                  project.custom_scale)
-    patterns = [Pattern(used=True, notes=buf) for buf in buffers]
+    # 自動生成のパターンに分かりやすい既定名を付ける (ソング画面が読みやすくなる)
+    default_names = ("Intro", "A", "B", "Outro")
+    patterns = [Pattern(used=True, notes=buf,
+                        name=default_names[i] if i < len(default_names) else "")
+                for i, buf in enumerate(buffers)]
     patterns += list(project.patterns[len(buffers):])
     song = list(song_ops.EMPTY_SONG)
     for block, pattern_id in enumerate(layout):
@@ -345,12 +349,50 @@ def generate_song(project: Project) -> Project:
 
 # ---- パターン (お気に入り) ----
 
-def save_pattern(project: Project, slot: int) -> Project:
-    """現在のフレーズをパターンスロットへ保存する。"""
+def save_pattern(project: Project, slot: int, name: str = None) -> Project:
+    """現在のフレーズをパターンスロットへ保存する。
+
+    name=None のときは既存スロットの名前を引き継ぐ (上書き保存で名前を失わない)。
+    """
     _check_pattern(slot)
+    if name is None:
+        name = project.patterns[slot].name
+    name = _clean_name(name)
     patterns = list(project.patterns)
-    patterns[slot] = Pattern(used=True, notes=project.phrase)
+    patterns[slot] = Pattern(used=True, notes=project.phrase, name=name)
     return update(project, patterns=tuple(patterns))
+
+
+def rename_pattern(project: Project, slot: int, name: str) -> Project:
+    """パターンに名前を付ける。未使用スロット・無変更なら何もしない。"""
+    _check_pattern(slot)
+    pattern = project.patterns[slot]
+    if not pattern.used:
+        return project
+    name = _clean_name(name)
+    if name == pattern.name:
+        return project
+    patterns = list(project.patterns)
+    patterns[slot] = Pattern(used=True, notes=pattern.notes, name=name)
+    return update(project, patterns=tuple(patterns))
+
+
+def duplicate_pattern(project: Project, slot: int):
+    """パターンを空きスロットへ複製する。(新しい Project, 複製先) を返す。
+
+    使用中でない・空きが無い場合は (元 Project, -1)。
+    """
+    _check_pattern(slot)
+    source = project.patterns[slot]
+    if not source.used:
+        return project, -1
+    dest = free_pattern_slot(project)
+    if dest == -1:
+        return project, -1
+    name = _clean_name((source.name or "") + " 2") if source.name else ""
+    patterns = list(project.patterns)
+    patterns[dest] = Pattern(used=True, notes=source.notes, name=name)
+    return update(project, patterns=tuple(patterns)), dest
 
 
 def load_pattern(project: Project, slot: int) -> Project:
@@ -371,6 +413,13 @@ def delete_pattern(project: Project, slot: int) -> Project:
     patterns[slot] = Pattern()
     song = song_ops.clear_pattern_refs(project.song, slot)
     return update(project, patterns=tuple(patterns), song=song)
+
+
+def _clean_name(name) -> str:
+    """名前を 1 行・前後空白なし・最大長に収める。"""
+    from .constants import PATTERN_NAME_MAX
+    text = " ".join(str(name).split())  # 改行・連続空白をつぶす
+    return text[:PATTERN_NAME_MAX]
 
 
 def free_pattern_slot(project: Project) -> int:

@@ -52,13 +52,16 @@ def _cached_voice(wave, pitch, dur_samples, tone, gate, rate, sound):
 
 def render_events(events, bpm: int, parts: tuple, total_ticks: int,
                   rate: int = SAMPLE_RATE, wrap: bool = False,
-                  sound: str = DEFAULT_SOUND):
+                  sound: str = DEFAULT_SOUND, mute=()):
     """イベント列をミックスして幅広整数のサンプル列 (list または numpy 配列) を返す。
 
     wrap=False: 末尾に余韻ぶんの尻尾を付ける (書き出し用)。
     wrap=True : 長さをちょうど total_ticks にし、はみ出す音は先頭へ折り返す
                 (ループ再生用。継ぎ目が途切れない)。
+    mute      : 消音する (wave, layer) の集合。同じ集合なら結果は決定的。
     """
+    if mute:
+        events = [e for e in events if (e.wave, e.layer) not in mute]
     if _np is not None:
         return _render_events_numpy(events, bpm, parts, total_ticks, rate, wrap, sound)
     return _render_events_python(events, bpm, parts, total_ticks, rate, wrap, sound)
@@ -143,31 +146,33 @@ def clip_to_pcm(mix) -> bytes:
     return clipped.tobytes()
 
 
-def render_phrase(project: Project, rate: int = SAMPLE_RATE) -> bytes:
+def render_phrase(project: Project, rate: int = SAMPLE_RATE, mute=()) -> bytes:
     """現在のフレーズを 16bit PCM にする。"""
     mix = render_events(phrase_events(project), project.bpm, project.parts,
-                        phrase_ticks(project), rate, sound=project.sound)
+                        phrase_ticks(project), rate, sound=project.sound, mute=mute)
     return clip_to_pcm(mix)
 
 
-def render_song(project: Project, rate: int = SAMPLE_RATE) -> bytes:
+def render_song(project: Project, rate: int = SAMPLE_RATE, mute=()) -> bytes:
     """ソング構成全体を 16bit PCM にする。"""
     mix = render_events(song_events(project), project.bpm, project.parts,
-                        song_ticks(project), rate, sound=project.sound)
+                        song_ticks(project), rate, sound=project.sound, mute=mute)
     return clip_to_pcm(mix)
 
 
-def render_phrase_loop(project: Project, rate: int = SAMPLE_RATE) -> bytes:
+def render_phrase_loop(project: Project, rate: int = SAMPLE_RATE, mute=()) -> bytes:
     """ループ再生用のフレーズ PCM (長さちょうど・折り返しミックス)。"""
     mix = render_events(phrase_events(project), project.bpm, project.parts,
-                        phrase_ticks(project), rate, wrap=True, sound=project.sound)
+                        phrase_ticks(project), rate, wrap=True, sound=project.sound,
+                        mute=mute)
     return clip_to_pcm(mix)
 
 
-def render_song_loop(project: Project, rate: int = SAMPLE_RATE) -> bytes:
+def render_song_loop(project: Project, rate: int = SAMPLE_RATE, mute=()) -> bytes:
     """ループ再生用のソング PCM。"""
     mix = render_events(song_events(project), project.bpm, project.parts,
-                        song_ticks(project), rate, wrap=True, sound=project.sound)
+                        song_ticks(project), rate, wrap=True, sound=project.sound,
+                        mute=mute)
     return clip_to_pcm(mix)
 
 

@@ -20,6 +20,7 @@ class Pattern:
     """保存済みフレーズ 1 スロット。"""
     used: bool = False
     notes: tuple = EMPTY_PHRASE
+    name: str = ""   # 表示用の名前 (空なら UI が F 番号を出す)
 
 
 # 各パート (波形) は 1〜8 レイヤーを持つ。既定は各パート 1 レイヤーずつ。

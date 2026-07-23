@@ -300,6 +300,61 @@ class TestPatterns(unittest.TestCase):
             p = actions.save_pattern(p, i)
         self.assertEqual(actions.free_pattern_slot(p), -1)
 
+    def test_save_defaults_to_empty_name(self):
+        p = actions.save_pattern(self.p, 0)
+        self.assertEqual(p.patterns[0].name, "")
+
+    def test_rename_pattern(self):
+        p = actions.save_pattern(self.p, 0)
+        p = actions.rename_pattern(p, 0, "  Aメロ  ")   # 前後空白は落とす
+        self.assertEqual(p.patterns[0].name, "Aメロ")
+        self.assertEqual(p.patterns[0].notes, self.p.phrase)  # 音符は不変
+
+    def test_rename_unused_is_noop(self):
+        self.assertIs(actions.rename_pattern(self.p, 3, "x"), self.p)
+
+    def test_rename_same_is_noop(self):
+        p = actions.rename_pattern(actions.save_pattern(self.p, 0), 0, "Solo")
+        self.assertIs(actions.rename_pattern(p, 0, "Solo"), p)
+
+    def test_rename_clamps_length(self):
+        p = actions.save_pattern(self.p, 0)
+        p = actions.rename_pattern(p, 0, "x" * 100)
+        from picoseq.core.constants import PATTERN_NAME_MAX
+        self.assertEqual(len(p.patterns[0].name), PATTERN_NAME_MAX)
+
+    def test_save_preserves_existing_name(self):
+        """名前付きスロットへ上書き保存しても名前は消えない。"""
+        p = actions.rename_pattern(actions.save_pattern(self.p, 0), 0, "Verse")
+        p2, _ = actions.place_note(p, 64, 4, 0)
+        p2 = actions.save_pattern(p2, 0)  # name 未指定 → 既存名を保持
+        self.assertEqual(p2.patterns[0].name, "Verse")
+
+    def test_duplicate_pattern(self):
+        p = actions.rename_pattern(actions.save_pattern(self.p, 0), 0, "Riff")
+        p, dest = actions.duplicate_pattern(p, 0)
+        self.assertEqual(dest, 1)
+        self.assertTrue(p.patterns[1].used)
+        self.assertEqual(p.patterns[1].notes, p.patterns[0].notes)
+        self.assertEqual(p.patterns[1].name, "Riff 2")
+
+    def test_duplicate_unused_returns_minus_one(self):
+        _, dest = actions.duplicate_pattern(self.p, 3)
+        self.assertEqual(dest, -1)
+
+    def test_duplicate_full_returns_minus_one(self):
+        p = self.p
+        for i in range(8):
+            p = actions.save_pattern(p, i)
+        p2, dest = actions.duplicate_pattern(p, 0)
+        self.assertEqual(dest, -1)
+        self.assertIs(p2, p)
+
+    def test_generate_song_names_patterns(self):
+        p = actions.generate_song(actions.set_seed(new_project(), 42))
+        self.assertEqual([p.patterns[i].name for i in range(4)],
+                         ["Intro", "A", "B", "Outro"])
+
 
 class TestSongEdit(unittest.TestCase):
     def setUp(self):

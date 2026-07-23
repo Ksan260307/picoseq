@@ -1,4 +1,8 @@
-"""ソンググリッド — 4トラック x 16ブロックの構成キャンバス。"""
+"""ソンググリッド — 4トラック x 16ブロックの構成キャンバス。
+
+上端にブロック番号のルーラー、各セルにパターン名 (無ければ F 番号) を表示する。
+配置中のパターンと同じセルは強調表示して、どこに何を置いたか分かりやすくする。
+"""
 
 import tkinter as tk
 
@@ -7,11 +11,16 @@ from ..core.project import steps_of
 from ..core.song import get_cell
 from . import theme
 
-MARGIN = 30
-CELL_W = 47
-CELL_H = 45
+TOP = 18       # 上端: ブロック番号ルーラー
+MARGIN = 34    # 左端: トラック名
+CELL_W = 54
+CELL_H = 44
 WIDTH = MARGIN + CELL_W * SONG_BLOCKS
-HEIGHT = CELL_H * SONG_TRACKS
+HEIGHT = TOP + CELL_H * SONG_TRACKS
+
+
+def _fit(text: str, max_chars: int = 7) -> str:
+    return text if len(text) <= max_chars else text[:max_chars - 1] + "…"
 
 
 class SongView:
@@ -32,8 +41,14 @@ class SongView:
         canvas = self.canvas
         canvas.delete("all")
 
+        # ブロック番号ルーラー (1..16)
+        for block in range(SONG_BLOCKS):
+            x = MARGIN + block * CELL_W
+            canvas.create_text(x + CELL_W // 2, TOP // 2 + 1, text=str(block + 1),
+                               font=theme.FONT_MONO, fill=theme.TEXT_DIM)
+
         for track in range(SONG_TRACKS):
-            y = track * CELL_H
+            y = TOP + track * CELL_H
             canvas.create_text(MARGIN - 6, y + CELL_H // 2, anchor="e",
                                text=f"T{track + 1}", font=theme.FONT_SMALL,
                                fill=theme.TEXT_DIM)
@@ -45,12 +60,12 @@ class SongView:
         # 2 ブロックごとの区切り線
         for block in range(0, SONG_BLOCKS + 1, 2):
             x = MARGIN + block * CELL_W
-            canvas.create_line(x, 0, x, HEIGHT, fill=theme.GRID_MEASURE, width=2)
+            canvas.create_line(x, TOP, x, HEIGHT, fill=theme.GRID_MEASURE, width=2)
 
         self.block_tint = canvas.create_rectangle(-99, -99, -99, -99,
                                                   fill=theme.ROW_ROOT, outline="")
         canvas.tag_lower(self.block_tint)
-        self.playhead_item = canvas.create_line(-10, 0, -10, HEIGHT,
+        self.playhead_item = canvas.create_line(-10, TOP, -10, HEIGHT,
                                                 fill=theme.PLAYHEAD, width=2)
         self.redraw_cells()
 
@@ -58,39 +73,46 @@ class SongView:
         canvas = self.canvas
         canvas.delete("cell")
         song = self.app.project.song
+        selected = getattr(self.app, "selected_pattern", -1)
         for track in range(SONG_TRACKS):
             for block in range(SONG_BLOCKS):
                 pattern_id = get_cell(song, track, block)
                 if pattern_id == EMPTY_CELL:
                     continue
                 x = MARGIN + block * CELL_W
-                y = track * CELL_H
+                y = TOP + track * CELL_H
                 color = theme.PATTERN_COLORS[pattern_id % len(theme.PATTERN_COLORS)]
+                # 配置中のパターンと同じセルは明るい枠で強調
+                outline = theme.PLAYHEAD if pattern_id == selected else ""
+                width = 2 if pattern_id == selected else 0
                 canvas.create_rectangle(x + 2, y + 2, x + CELL_W - 2, y + CELL_H - 2,
-                                        fill=color, outline="", tags="cell")
-                canvas.create_text(x + CELL_W // 2, y + CELL_H // 2,
-                                   text=f"F{pattern_id + 1}", font=theme.FONT_BOLD,
-                                   fill=theme.KEY_TEXT, tags="cell")
+                                        fill=color, outline=outline, width=width,
+                                        tags="cell")
+                label = _fit(self.app.pattern_label(pattern_id))
+                canvas.create_text(x + CELL_W // 2, y + CELL_H // 2, text=label,
+                                   font=theme.FONT_SMALL, fill=theme.KEY_TEXT,
+                                   tags="cell")
         canvas.tag_raise(self.playhead_item)
 
     def set_playhead(self, tick):
         """再生位置。tick はソング全体の通し Tick (None で隠す)。"""
         if tick is None:
-            self.canvas.coords(self.playhead_item, -10, 0, -10, HEIGHT)
+            self.canvas.coords(self.playhead_item, -10, TOP, -10, HEIGHT)
             self.canvas.coords(self.block_tint, -99, -99, -99, -99)
             return
         steps = steps_of(self.app.project)
         block = int(tick // steps)
         x = MARGIN + (tick / steps) * CELL_W
-        self.canvas.coords(self.playhead_item, x, 0, x, HEIGHT)
+        self.canvas.coords(self.playhead_item, x, TOP, x, HEIGHT)
         bx = MARGIN + block * CELL_W
-        self.canvas.coords(self.block_tint, bx, 0, bx + CELL_W, HEIGHT)
+        self.canvas.coords(self.block_tint, bx, TOP, bx + CELL_W, HEIGHT)
 
     def _cell_at(self, event):
         x = event.x - MARGIN
-        if x < 0:
+        y = event.y - TOP
+        if x < 0 or y < 0:
             return None
-        track = event.y // CELL_H
+        track = y // CELL_H
         block = x // CELL_W
         if 0 <= track < SONG_TRACKS and 0 <= block < SONG_BLOCKS:
             return int(track), int(block)

@@ -23,6 +23,7 @@ def _rich_project():
     p, _ = actions.place_note(p, 60, 0, 0, dur=2)
     p, _ = actions.place_note(p, 48, 4, 1)
     p = actions.save_pattern(p, 0)
+    p = actions.rename_pattern(p, 0, "メインリフ")
     p = actions.save_pattern(p, 5)
     p = actions.toggle_song_cell(p, 0, 0, 0)
     p = actions.toggle_song_cell(p, 2, 7, 5)
@@ -43,6 +44,39 @@ class TestRoundtrip(unittest.TestCase):
         data = to_jsonable(new_project())
         self.assertEqual(data["app"], APP_ID)
         self.assertEqual(data["schema"], SCHEMA_VERSION)
+
+
+class TestPatternName(unittest.TestCase):
+    """schema v6 で追加されたパターン名の入出力。"""
+
+    def test_name_roundtrip(self):
+        p = actions.rename_pattern(actions.save_pattern(new_project(), 0), 0, "サビ")
+        self.assertEqual(loads(dumps(p)).patterns[0].name, "サビ")
+
+    def test_schema5_data_loads_without_name(self):
+        """v5 のデータ (name 無し) も読めて空文字になる (後方互換)。"""
+        p = actions.save_pattern(new_project(), 0)
+        data = to_jsonable(p)
+        data["schema"] = 5
+        for entry in data["patterns"]:
+            entry.pop("name", None)
+        restored = loads(json.dumps(data))
+        self.assertTrue(restored.patterns[0].used)
+        self.assertEqual(restored.patterns[0].name, "")
+
+    def test_non_string_name_becomes_empty(self):
+        p = actions.save_pattern(new_project(), 0)
+        data = to_jsonable(p)
+        data["patterns"][0]["name"] = 12345
+        self.assertEqual(loads(json.dumps(data)).patterns[0].name, "")
+
+    def test_name_length_clamped_on_load(self):
+        from picoseq.core.constants import PATTERN_NAME_MAX
+        p = actions.save_pattern(new_project(), 0)
+        data = to_jsonable(p)
+        data["patterns"][0]["name"] = "x" * 100
+        self.assertEqual(len(loads(json.dumps(data)).patterns[0].name),
+                         PATTERN_NAME_MAX)
 
 
 class TestProgressionField(unittest.TestCase):
