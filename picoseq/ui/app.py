@@ -7,6 +7,7 @@
 import random
 import tempfile
 import threading
+import time
 import tkinter as tk
 import traceback
 from pathlib import Path
@@ -16,8 +17,11 @@ from ..core import actions
 from ..core.constants import (
     BPM_MAX,
     BPM_MIN,
+    EMPTY_CELL,
     MAX_NOTES,
     PATTERN_COUNT,
+    PITCH_MAX,
+    PITCH_MIN,
     SAMPLE_RATE,
     SEED_MAX,
     SEED_MIN,
@@ -44,13 +48,18 @@ from . import i18n, storage, theme
 from .i18n import t
 from .help import HelpDialog
 from .panel import DockPanel
+from .dj_view import DJView
 from .hum import HumDialog
 from .photo import PhotoDialog, analyze_photo
 from .playback import PlayClock, SoundPlayer, rotate_pcm
+from .stream import StreamPlayer
 from .roll_view import RollView
 from .song_view import SongView
 
 LIVE_DEBOUNCE_MS = 140  # 演奏中の編集をまとめて再レンダリングする間隔
+DJ_RENDER_DEBOUNCE_MS = 120  # DJ: 次ループの事前レンダリングをまとめる間隔
+DJ_ADVANCE_LOOPS = 4    # DJ: 何ループ流したら自動で次へ進むか (2小節×4 = 8小節)
+DJ_SCRATCH_MS = 45      # スクラッチ音の最短間隔 (ミリ秒)
 
 
 class PicoSeqApp:
@@ -64,9 +73,33 @@ class PicoSeqApp:
         self.muted = set()  # 消音中の (wave, layer) の集合。再生・WAV に反映
         self.roll_zoom = 1.0  # ピアノロールの拡大率 (画面再構築後も保つ)
         self.selected_pattern = -1
+        # DJ モード: 2 デッキ。曲調・テンポ・ノイズ・フィルター・固定・消音はデッキごとに独立。
+        self.dj_decks = [self._new_dj_deck(self.project.scale, self.project.seed,
+                                           self.project.bpm),
+                         self._new_dj_deck("battle", 2, self.project.bpm)]
+        self.dj_active = 0
+        self._dj_last_pos = 0.0
+        self._dj_loop_count = 0     # 現フレーズを何ループ流したか
+        self._dj_want_seed = self.dj_decks[0]["seed"]  # 次に流すフレーズのシード
+        self._dj_pending = None     # 事前レンダリング済みの次ループ (path, bpm, ticks, project, seed)
+        self._dj_swap_soon = False  # (フォールバック用) 次の境界で差し替える
+        self._dj_apply_now = False  # 出来たら即その場で反映する
+        self._dj_render_token = None
+        self._dj_render_busy = False
+        self._dj_taps = []          # タップテンポの打点 (monotonic 秒)
+        self._dj_scratching = False
+        self._dj_scratch_last = 0.0
+        self._dj_scratch_cache = {}
+        self._dj_now = None         # 現在鳴らしているループ スクラッチ復帰用
+        self._dj_incoming = None    # 乗り換えを予約した内容 (切替完了時に反映)
+        self._dj_last_loops = 0
+        self._dj_last_switches = 0
         self.tab = "phrase"
 
         self.player = SoundPlayer(silent=silent)
+        # ストリーミング再生 (継ぎ目なしの乗り換え・効果音の重ね)。使えなければ従来のファイル再生へ。
+        self.stream = StreamPlayer(rate=SAMPLE_RATE)
+        self.stream_ok = (not silent) and self.stream.open()
         self.clock = PlayClock()
         self.play_mode = None
         self.play_bpm = 120
@@ -195,9 +228,11 @@ class PicoSeqApp:
         self.tab_phrase_btn = self._button(header, t("tab_phrase"), lambda: self.switch_tab("phrase"))
         self.tab_pattern_btn = self._button(header, t("tab_pattern"), lambda: self.switch_tab("pattern"))
         self.tab_song_btn = self._button(header, t("tab_song"), lambda: self.switch_tab("song"))
+        self.tab_dj_btn = self._button(header, t("tab_dj"), lambda: self.switch_tab("dj"))
         self.tab_phrase_btn.pack(side="left", padx=(16, 2))
         self.tab_pattern_btn.pack(side="left", padx=2)
         self.tab_song_btn.pack(side="left", padx=2)
+        self.tab_dj_btn.pack(side="left", padx=2)
 
         tk.Label(header, text=t("lbl_sound"), font=theme.FONT_SMALL,
                  bg=theme.BG, fg=theme.TEXT_DIM).pack(side="left", padx=(14, 2))
@@ -288,6 +323,11 @@ class PicoSeqApp:
                  ).pack(fill="x", pady=(0, 6))
         self.pattern_list = tk.Frame(self.pattern_frame, bg=theme.PANEL)
         self.pattern_list.pack(fill="both", expand=True)
+
+        # ---- DJ タブ ----
+        self.dj_frame = tk.Frame(root, bg=theme.BG)
+        self.dj_view = DJView(self.dj_frame, self)
+        self.dj_view.frame.pack(fill="both", expand=True, padx=6, pady=6)
 
         # ---- ステータスバー ----
         status = tk.Frame(root, bg=theme.BG)
@@ -442,8 +482,12 @@ class PicoSeqApp:
                 command=lambda i=i: self.select_pattern(i), relief="flat", bd=1,
                 takefocus=0, cursor="hand2",
             )
+            btn.bind("<Enter>", lambda e, i=i: self._on_palette_hover(i))  # 名前を状況に表示
             btn.pack(side="left", padx=2)
             self.pattern_buttons.append(btn)
+        # 選択中パターンをその場で試聴
+        self._button(palette, t("btn_preview"), self.preview_selected_pattern
+                     ).pack(side="left", padx=(10, 2))
         self._button(palette, t("song_go_patterns"),
                      lambda: self.switch_tab("pattern")).pack(side="right", padx=2)
 
@@ -698,16 +742,16 @@ class PicoSeqApp:
         beat = step % (beats * 4) // 4 + 1
         self.cell_var.set(t("cell_hint", note=note_name(pitch), measure=measure, beat=beat))
 
-    TABS = ("phrase", "pattern", "song")
+    TABS = ("phrase", "pattern", "song", "dj")
 
     def switch_tab(self, name, stop=True):
         if stop:
             self.stop_playback()
         self.tab = name
         frames = {"phrase": self.phrase_frame, "pattern": self.pattern_frame,
-                  "song": self.song_frame}
+                  "song": self.song_frame, "dj": self.dj_frame}
         hints = {"phrase": t("hint_phrase"), "pattern": t("hint_pattern"),
-                 "song": t("hint_song")}
+                 "song": t("hint_song"), "dj": t("hint_dj")}
         for key, frame in frames.items():
             if key == name:
                 frame.pack(fill="both", expand=True, padx=10, pady=4)
@@ -715,12 +759,15 @@ class PicoSeqApp:
                 frame.pack_forget()
         if name == "pattern":
             self._rebuild_pattern_list()
+        elif name == "dj":
+            self._refresh_dj()
         self.set_status(hints[name])
         on = dict(bg=theme.BTN_ON, fg=theme.BTN_ON_TEXT)
         off = dict(bg=theme.BTN_BG, fg=theme.TEXT)
         self.tab_phrase_btn.configure(**(on if name == "phrase" else off))
         self.tab_pattern_btn.configure(**(on if name == "pattern" else off))
         self.tab_song_btn.configure(**(on if name == "song" else off))
+        self.tab_dj_btn.configure(**(on if name == "dj" else off))
 
     # ==============================
     # フレーズ編集 (RollView から呼ばれる)
@@ -830,7 +877,8 @@ class PicoSeqApp:
             self._update_mute_buttons()
         self._rebuild_layer_bar()   # レイヤーごとの 🔊/🔇 表示を更新
         self.roll.redraw_notes()
-        if self.play_mode:  # 再生中なら次のループへ反映
+        # DJ 画面からの消音は DJ 側で即反映するので、汎用の再描画は走らせない
+        if self.play_mode and self.tab != "dj":
             self._schedule_live_rerender()
 
     def _sync_part_sliders(self):
@@ -843,20 +891,21 @@ class PicoSeqApp:
             self._syncing = False
 
     def preview_note(self, pitch):
-        """鍵盤の試聴。再生中は邪魔しない。"""
-        if self.play_mode or self.silent:
+        """鍵盤の試聴。ストリーミング再生なら演奏に重ねて鳴らせる。"""
+        if self.silent:
             return
+        if self.play_mode and not self.stream_ok:
+            return                       # 重ねられない環境では演奏を邪魔しない
         params = part_params(self.project, self.part, self.layer)
         key = (self.part, pitch, params.tone, params.gate, self.project.sound)
-        wav = self._preview_cache.get(key)
-        if wav is None:
-            wav = wav_bytes(render_preview(self.part, pitch, params.tone,
-                                           params.gate, sound=self.project.sound))
+        pcm = self._preview_cache.get(key)
+        if pcm is None:
+            pcm = render_preview(self.part, pitch, params.tone,
+                                 params.gate, sound=self.project.sound)
             if len(self._preview_cache) > 48:
                 self._preview_cache.clear()
-            self._preview_cache[key] = wav
-        path = storage.write_play_wav("preview", wav)
-        self.player.play_file(path, loop=False)
+            self._preview_cache[key] = pcm
+        self._play_oneshot(pcm)
 
     def clear_phrase(self):
         if count_notes(self.project.phrase) == 0:
@@ -1177,12 +1226,12 @@ class PicoSeqApp:
 
     def play_pattern(self, slot):
         pattern = self.project.patterns[slot]
-        if not pattern.used or self.silent or self.play_mode:
+        if not pattern.used or self.silent:
             return
+        if self.play_mode and not self.stream_ok:
+            return                       # 重ねられない環境では演奏中は試聴しない
         temp = actions.update(self.project, phrase=pattern.notes)
-        pcm = render_phrase(temp, mute=self.mute_pairs())
-        path = storage.write_play_wav("pattern", wav_bytes(pcm))
-        self.player.play_file(path, loop=False)
+        self._play_oneshot(render_phrase(temp, mute=self.mute_pairs()))
         self.set_status(t("st_pat_previewing", n=slot + 1, label=self.pattern_label(slot)))
 
     def _ask_text(self, title, prompt, initial=""):
@@ -1235,6 +1284,31 @@ class PicoSeqApp:
     def song_erase(self, track, block):
         self.commit(actions.erase_song_cell(self.project, track, block))
 
+    def show_song_hint(self, track, block):
+        """マス目に触れたら、そこにあるパターン名をステータスに出す。"""
+        from ..core.song import get_cell
+        pid = get_cell(self.project.song, track, block)
+        if pid == EMPTY_CELL:
+            self.cell_var.set(t("song_cell_empty", track=track + 1, block=block + 1))
+        else:
+            self.cell_var.set(t("song_cell_hint", track=track + 1, block=block + 1,
+                                label=self.pattern_label(pid)))
+
+    def clear_song_hint(self):
+        self.cell_var.set("")
+
+    def _on_palette_hover(self, slot):
+        """パレットのボタンに触れたら、その中身の名前を出す (F番号だけでは分かりにくいので)。"""
+        if self.project.patterns[slot].used:
+            self.cell_var.set(t("palette_hint", n=slot + 1, label=self.pattern_label(slot)))
+
+    def preview_selected_pattern(self):
+        """ソング画面で、選択中のパターンをその場で 1 回試聴する。"""
+        if self.selected_pattern == -1:
+            self.set_status(t("st_preview_pick"))
+            return
+        self.play_pattern(self.selected_pattern)
+
     def generate_song_auto(self):
         """1 曲ぶんの自動作成 — 新しいシード値でパターンと構成を丸ごと作る。"""
         touched = (used_blocks(self.project.song) > 0
@@ -1254,6 +1328,420 @@ class PicoSeqApp:
             return
         if self.confirm(t("ttl_clear"), t("st_clear_song_q")):
             self.commit(actions.clear_song(self.project))
+
+    # ==============================
+    # DJ モード
+    # ==============================
+
+    @staticmethod
+    def _new_dj_deck(scale, seed, bpm):
+        """デッキ 1 台ぶんの設定 (曲調・シード・テンポ・ノイズ・フィルター・固定・消音)。"""
+        return {"scale": scale, "seed": seed, "bpm": bpm, "noise": 0,
+                "filter": 100, "hold": False, "muted": set()}
+
+    def _dj_scale_label(self, scale_id) -> str:
+        from ..core.music import SCALES
+        if scale_id not in SCALES:
+            scale_id = "major"
+        return i18n.scale_label(scale_id, SCALES[scale_id]["label"])
+
+    def _dj_deck(self, deck=None):
+        return self.dj_decks[self.dj_active if deck is None else deck]
+
+    def _dj_mute_pairs(self, deck=None):
+        """デッキの KILL (パート単位) を、レンダラが使う (wave, layer) 集合にする。"""
+        muted = self._dj_deck(deck)["muted"]
+        pairs = set()
+        for wave in muted:
+            for layer in range(layer_count(self.project, wave)):
+                pairs.add((wave, layer))
+        return frozenset(pairs)
+
+    def _refresh_dj(self):
+        """DJ 画面のつまみ・表示を状態に合わせる (タブ表示時)。"""
+        if not hasattr(self, "dj_view"):
+            return
+        self.dj_view.sync_crossfade(self.dj_active)
+        self._update_dj_decks()
+
+    def _update_dj_decks(self):
+        for i, key in enumerate(("a", "b")):
+            deck = self.dj_decks[i]
+            self.dj_view.sync_deck(key, deck, self._dj_scale_label(deck["scale"]),
+                                   active=(i == self.dj_active))
+        self.dj_view.set_play(self.play_mode == "phrase")
+
+    def _dj_project_for(self, seed):
+        """アクティブデッキの設定 (曲調・テンポ・ノイズ) でループ Project を作る。"""
+        deck = self._dj_deck()
+        p = actions.set_scale(self.project, deck["scale"])
+        p = actions.set_bpm(p, deck["bpm"])
+        p = actions.set_seed(p, seed)
+        p = actions.generate_phrase(p)
+        if deck["noise"] > 0:
+            from ..core import dj as dj_core
+            from ..core.phrase import active_notes, build_phrase
+            notes = [n for _, n in active_notes(p.phrase)]
+            notes = dj_core.add_noise(notes, p.beats, deck["noise"], seed)
+            p = actions.update(p, phrase=build_phrase(notes))
+        return p
+
+    # ---- 連続フロー: 事前レンダリング → ループ境界で継ぎ目なく差し替え ----
+
+    def _dj_queue(self, seed=None, immediate=True):
+        """操作の結果を作り直す。immediate なら出来次第その場で音に反映する。"""
+        if seed is not None:
+            self._dj_want_seed = seed
+        self._dj_pending = None          # 古い準備は捨てる
+        self._dj_apply_now = immediate
+        self._dj_schedule_render()
+
+    def _dj_prepare_auto(self):
+        """継続フロー用に、新しいランダムシードで次フレーズを仕込む (継ぎ目で乗り換え)。"""
+        self._dj_want_seed = random.randint(SEED_MIN, SEED_MAX)
+        self._dj_apply_now = False
+        self._dj_schedule_render()
+
+    def _dj_apply_immediate(self, result):
+        """出来上がったループを、今の再生位置を保ったまま即座に差し替える。"""
+        path, pcm, bpm, ticks, project, seed = result
+        self.project = project
+        self.dj_decks[self.dj_active]["seed"] = seed
+        old_duration = self.play_ticks * tick_seconds(self.play_bpm)
+        position = self.clock.position() or 0.0
+        fraction = (position / old_duration) if old_duration > 0 else 0.0
+        self.play_bpm = bpm
+        self.play_ticks = ticks
+        if self.stream_ok:
+            self.stream.replace_loop(pcm)      # 止めずに中身だけ入れ替え
+            self._dj_now = (pcm, bpm, ticks)
+            self._dj_last_loops = self.stream.loops
+            self._dj_last_switches = self.stream.switches
+            self.clock.start(ticks * tick_seconds(bpm),
+                             offset_seconds=fraction * ticks * tick_seconds(bpm))
+        else:
+            self._begin_loop(pcm, "phrase", bpm, ticks, offset_tick=fraction * ticks)
+        self._update_dj_decks()
+
+    def _dj_schedule_render(self):
+        if self.silent or self.play_mode != "phrase":
+            return
+        if self._dj_render_token is not None:
+            self.root.after_cancel(self._dj_render_token)
+        self._dj_render_token = self.root.after(DJ_RENDER_DEBOUNCE_MS, self._dj_render_next)
+
+    def _dj_signature(self):
+        """次ループを決めるパラメータの指紋 (準備中に変わったか判定する)。"""
+        deck = self._dj_deck()
+        return (self._dj_want_seed, deck["scale"], deck["bpm"], deck["noise"],
+                deck["filter"], tuple(sorted(deck["muted"])), self.dj_active)
+
+    def _dj_render_next(self):
+        """予約したフレーズのループを裏スレッドで作り、_dj_pending へ置く。"""
+        self._dj_render_token = None
+        if self.silent or self.play_mode != "phrase":
+            return
+        if self._dj_render_busy:
+            self._dj_schedule_render()
+            return
+        seed = self._dj_want_seed
+        project = self._dj_project_for(seed)
+        mute = self._dj_mute_pairs()
+        dj_filter = self._dj_deck()["filter"]
+        signature = self._dj_signature()
+        self._dj_render_busy = True
+
+        def work():
+            from ..core import dj as dj_core
+            pcm = render_phrase_loop(project, mute=mute)
+            pcm = dj_core.lowpass_pcm(pcm, dj_filter)
+            path = None if self.stream_ok else storage.write_play_wav("dj_next", wav_bytes(pcm))
+            return path, pcm, project.bpm, phrase_ticks(project), project, seed
+
+        def done(result):
+            self._dj_render_busy = False
+            if self.play_mode != "phrase":
+                return
+            if self._dj_signature() != signature:
+                self._dj_schedule_render()   # 準備中に変わった → 作り直す
+            elif self._dj_apply_now:
+                self._dj_apply_now = False
+                self._dj_apply_immediate(result)   # 操作の結果をその場で反映
+            else:
+                self._dj_pending = result
+
+        self._run_bg(work, done)
+
+    def _dj_do_swap(self):
+        """準備済みの次ループへ乗り換える。
+
+        ストリーミング再生なら「次はこれ」と渡すだけで、再生を止めずに
+        ループの継ぎ目でサンプル単位で切り替わる (無音が入らない)。
+        """
+        if self._dj_pending is None:
+            return False
+        path, pcm, bpm, ticks, project, seed = self._dj_pending
+        self._dj_pending = None
+        self._dj_swap_soon = False
+        if self.stream_ok:
+            self.stream.set_next(pcm)                 # 継ぎ目で自動的に乗り換わる
+            self._dj_incoming = (pcm, bpm, ticks, project, seed)
+            return True
+        # フォールバック (ファイル再生): その場で鳴らし直す
+        self._dj_loop_count = 0
+        self.project = project
+        self.dj_decks[self.dj_active]["seed"] = seed
+        self.player.play_file(path, loop=True)
+        self.clock.start(ticks * tick_seconds(bpm), offset_seconds=0.0)
+        self.play_bpm = bpm
+        self.play_ticks = ticks
+        self._dj_now = (path, bpm, ticks)
+        self._dj_last_pos = 0.0
+        self._update_dj_decks()
+        return True
+
+    def _dj_on_switched(self):
+        """ストリーム側が実際に乗り換えたので、表示と状態をそれに合わせる。"""
+        if self._dj_incoming is None:
+            return
+        pcm, bpm, ticks, project, seed = self._dj_incoming
+        self._dj_incoming = None
+        self.project = project
+        self.dj_decks[self.dj_active]["seed"] = seed
+        self.play_bpm = bpm
+        self.play_ticks = ticks
+        self._dj_now = (pcm, bpm, ticks)
+        self._dj_loop_count = 0
+        self.clock.start(ticks * tick_seconds(bpm), offset_seconds=0.0)
+        self._update_dj_decks()
+
+    @staticmethod
+    def _dj_should_swap(loop_count, hold, has_pending, swap_soon, advance_loops):
+        """ループ境界で次フレーズへ差し替えるか。手動変更は即、通常は N ループごと。"""
+        if not has_pending:
+            return False
+        if swap_soon:
+            return True
+        return (not hold) and loop_count >= advance_loops
+
+    def dj_play(self):
+        if self.play_mode == "phrase":
+            self.stop_playback()
+            return
+        if count_notes(self.project.phrase) == 0:
+            self.project = self._dj_project_for(self.dj_decks[self.dj_active]["seed"])
+            self._update_dj_decks()
+        self.stop_playback()
+        self._dj_pending = None
+        self._dj_swap_soon = False
+        self._dj_loop_count = 0
+        self._dj_last_pos = 0.0
+        self.start_playback("phrase")
+        self.dj_view.set_play(True)
+
+    def dj_roll(self, deck):
+        seed = random.randint(SEED_MIN, SEED_MAX)
+        self.dj_decks[deck]["seed"] = seed
+        if deck == self.dj_active:
+            if self.play_mode == "phrase":
+                self._dj_queue(seed=seed, immediate=True)
+            else:
+                self.project = self._dj_project_for(seed)  # 停止中は即差し替え
+        self._update_dj_decks()
+        self.set_status(t("st_dj_rolled", deck="AB"[deck], seed=seed))
+
+    def _dj_changed(self, deck, reseed=False):
+        """デッキの設定が変わったときの共通処理。アクティブなら音へ即反映する。"""
+        if deck != self.dj_active:
+            self._update_dj_decks()      # 待機側は表示だけ更新 (音はそのまま)
+            return
+        seed = random.randint(SEED_MIN, SEED_MAX) if reseed else None
+        if seed is not None:
+            self.dj_decks[deck]["seed"] = seed
+        if self.play_mode == "phrase":
+            self._dj_queue(seed=seed, immediate=True)
+        else:
+            self.project = self._dj_project_for(self.dj_decks[deck]["seed"])
+        self._update_dj_decks()
+
+    def dj_set_scale(self, deck, scale_id):
+        """デッキの曲調を選ぶ (セレクタから)。"""
+        if scale_id not in SCALE_IDS or self.dj_decks[deck]["scale"] == scale_id:
+            return
+        self.dj_decks[deck]["scale"] = scale_id
+        self._dj_changed(deck, reseed=True)
+        self.set_status(t("st_dj_mood", deck="AB"[deck],
+                          mood=self._dj_scale_label(scale_id)))
+
+    def dj_mood(self, deck):
+        """曲調をランダムに選び直す (おまかせ)。"""
+        self.dj_set_scale(deck, random.choice(SCALE_IDS))
+
+    def dj_set_crossfade(self, value):
+        new_active = 0 if value < 50 else 1
+        if new_active == self.dj_active:
+            return
+        self.dj_active = new_active
+        if self.play_mode == "phrase":
+            self._dj_queue(seed=self.dj_decks[new_active]["seed"], immediate=True)
+        else:
+            self.project = self._dj_project_for(self.dj_decks[new_active]["seed"])
+        self._update_dj_decks()
+        self.set_status(t("st_dj_switch", deck="AB"[new_active]))
+
+    def dj_set_hold(self, deck, on):
+        self.dj_decks[deck]["hold"] = bool(on)
+        self._update_dj_decks()
+        self.set_status(t("st_dj_hold_on") if on else t("st_dj_hold_off"))
+
+    def dj_set_noise(self, deck, level):
+        level = max(0, min(4, int(level)))
+        if level == self.dj_decks[deck]["noise"]:
+            return
+        self.dj_decks[deck]["noise"] = level
+        self._dj_changed(deck)
+        self.set_status(t("st_dj_noise", level=level))
+
+    def dj_set_filter(self, deck, level):
+        level = max(0, min(100, int(level)))
+        if level == self.dj_decks[deck]["filter"]:
+            return
+        self.dj_decks[deck]["filter"] = level
+        self._dj_changed(deck)
+
+    def dj_set_tempo(self, deck, bpm):
+        bpm = max(BPM_MIN, min(BPM_MAX, int(bpm)))
+        if bpm == self.dj_decks[deck]["bpm"]:
+            return
+        self.dj_decks[deck]["bpm"] = bpm
+        self._dj_changed(deck)
+
+    def dj_tap(self):
+        """タップテンポ — 押した間隔の平均から、アクティブデッキの BPM を決める。"""
+        now = time.monotonic()
+        self._dj_taps = [tap for tap in self._dj_taps if now - tap < 2.0]
+        self._dj_taps.append(now)
+        bpm = self._tap_bpm(self._dj_taps)
+        if bpm is None:
+            return
+        self.dj_set_tempo(self.dj_active, bpm)
+        self.dj_view.set_tempo(self.dj_active, bpm)
+
+    @staticmethod
+    def _tap_bpm(taps):
+        """打点 (monotonic 秒) の列から BPM を求める。2 打未満・不正なら None。"""
+        if len(taps) < 2:
+            return None
+        intervals = [b - a for a, b in zip(taps, taps[1:])]
+        avg = sum(intervals) / len(intervals)
+        if avg <= 0:
+            return None
+        return max(BPM_MIN, min(BPM_MAX, int(round(60.0 / avg))))
+
+    def dj_kill(self, deck, part):
+        muted = self.dj_decks[deck]["muted"]
+        if part in muted:
+            muted.discard(part)
+        else:
+            muted.add(part)
+        self._dj_changed(deck)                  # アクティブなら今のループへ即反映
+
+    # ---- スクラッチ (ディスクをドラッグ) ----
+
+    @staticmethod
+    def dj_scratch_pitch(delta):
+        """ドラッグ角度の変化からスクラッチ音の高さを決める (前=高い / 後=低い)。"""
+        speed = min(28, abs(delta))
+        pitch = 56 + int(speed) if delta >= 0 else 56 - int(speed) - 6
+        return max(PITCH_MIN, min(PITCH_MAX, pitch))
+
+    def dj_scratch_start(self, deck):
+        self._dj_scratching = True
+        # ストリーミング再生なら音楽に重ねてスクラッチできるので止めない。
+        if not self.silent and not self.stream_ok and self.play_mode == "phrase":
+            self.player.stop()          # フォールバック時のみ一旦止める
+
+    def dj_scratch_move(self, deck, delta):
+        if not self._dj_scratching or self.silent:
+            return
+        now = time.monotonic()
+        if now - self._dj_scratch_last < DJ_SCRATCH_MS / 1000.0:
+            return
+        self._dj_scratch_last = now
+        self._dj_play_scratch(self.dj_scratch_pitch(delta))
+
+    def dj_scratch_end(self, deck):
+        if not self._dj_scratching:
+            return
+        self._dj_scratching = False
+        if self.silent or self.stream_ok:
+            return                                # 重ねて鳴らしていたので何も戻さなくてよい
+        self.player.stop()
+        if self.play_mode == "phrase" and self._dj_now is not None:
+            path, bpm, ticks = self._dj_now       # ダウンビートから鳴らし直す
+            self.player.play_file(path, loop=True)
+            self.clock.start(ticks * tick_seconds(bpm), offset_seconds=0.0)
+            self._dj_last_pos = 0.0
+
+    def _dj_play_scratch(self, pitch):
+        from ..core.constants import WAVE_PULSE
+        pcm = self._dj_scratch_cache.get(pitch)
+        if pcm is None:
+            pcm = render_preview(WAVE_PULSE, pitch, 70, 100, sound=self.project.sound)
+            if len(self._dj_scratch_cache) > 64:
+                self._dj_scratch_cache.clear()
+            self._dj_scratch_cache[pitch] = pcm
+        self._play_oneshot(pcm)
+
+    def _play_oneshot(self, pcm):
+        """効果音を 1 回鳴らす。ストリーミング再生なら音楽に重ねて鳴る。"""
+        if self.silent:
+            return
+        if self.stream_ok:
+            self.stream.play_oneshot(pcm)
+        else:
+            self.player.play_file(storage.write_play_wav("oneshot", wav_bytes(pcm)),
+                                  loop=False)
+
+    def _dj_spin_tick(self):
+        """再生位置に合わせてターンテーブルを回し、境界で継ぎ目なく差し替える。"""
+        if self._dj_scratching:
+            return                     # スクラッチ中は DJView が手で回す
+        spinning = self.play_mode == "phrase"
+        beat_level = 0.0
+        if spinning:
+            pos = self.clock.position() or 0.0
+            beat_dur = tick_seconds(self.play_bpm) * 4  # 1 拍 = 16 分 4 つ
+            if beat_dur > 0:
+                phase = (pos % beat_dur) / beat_dur
+                beat_level = max(0.0, 1.0 - phase * 3)
+            if self.stream_ok:
+                # 実際の再生ストリームのループ/乗り換え回数で進行を数える
+                if self.stream.switches != self._dj_last_switches:
+                    self._dj_last_switches = self.stream.switches
+                    self._dj_on_switched()
+                if self.stream.loops != self._dj_last_loops:
+                    self._dj_last_loops = self.stream.loops
+                    self._dj_loop_count += 1
+                    # 最後の 1 周に入ったら次を渡す → その継ぎ目で乗り換わる
+                    if self._dj_should_swap(self._dj_loop_count, self._dj_deck()["hold"],
+                                            self._dj_pending is not None,
+                                            self._dj_swap_soon, DJ_ADVANCE_LOOPS - 1):
+                        self._dj_do_swap()
+            else:
+                if pos < self._dj_last_pos - 0.05:      # ループ折り返し = ダウンビート
+                    self._dj_loop_count += 1
+                    if self._dj_should_swap(self._dj_loop_count, self._dj_deck()["hold"],
+                                            self._dj_pending is not None,
+                                            self._dj_swap_soon, DJ_ADVANCE_LOOPS):
+                        self._dj_do_swap()
+            self._dj_last_pos = pos
+            # 常に次の 1 つを仕込んでおく (連続フロー)
+            if (self._dj_pending is None and self._dj_incoming is None
+                    and not self._dj_render_busy and self._dj_render_token is None):
+                self._dj_prepare_auto()
+        key = "a" if self.dj_active == 0 else "b"
+        self.dj_view.update_spin(key, spinning, beat_level)
 
     # ==============================
     # 再生
@@ -1311,14 +1799,24 @@ class PicoSeqApp:
         offset_samples = int(offset_tick * spt)
         if offset_samples:
             pcm = rotate_pcm(pcm, offset_samples)
-        wav = wav_bytes(pcm)
-        path = storage.write_play_wav("play", wav)
-        self.player.play_file(path, loop=True)
-        duration = (len(wav) - 44) / 2 / SAMPLE_RATE
+        if self.stream_ok:
+            self.stream.set_loop(pcm)          # 送り続ける方式 (継ぎ目なしで乗り換えられる)
+            duration = len(pcm) / 2 / SAMPLE_RATE
+            self._dj_now = (pcm, bpm, ticks)
+            self._dj_last_loops = self.stream.loops
+            self._dj_last_switches = self.stream.switches
+        else:
+            wav = wav_bytes(pcm)
+            path = storage.write_play_wav("play", wav)
+            self.player.play_file(path, loop=True)
+            duration = (len(wav) - 44) / 2 / SAMPLE_RATE
+            self._dj_now = (path, bpm, ticks)  # スクラッチからの復帰用
         self.clock.start(duration, offset_seconds=offset_tick * tick_seconds(bpm))
         self.play_mode = mode
         self.play_bpm = bpm
         self.play_ticks = ticks
+        self._dj_loop_count = 0
+        self._dj_incoming = None
         self._sync_play_buttons()
 
     def _sync_play_buttons(self):
@@ -1326,12 +1824,21 @@ class PicoSeqApp:
             text=t("btn_stop") if self.play_mode == "phrase" else t("btn_play"))
         self.play_song_btn.configure(
             text=t("btn_stop") if self.play_mode == "song" else t("btn_play_song"))
+        if hasattr(self, "dj_view"):
+            self.dj_view.set_play(self.play_mode == "phrase")
 
     def stop_playback(self):
         if self._live_token is not None:
             self.root.after_cancel(self._live_token)
             self._live_token = None
+        if self._dj_render_token is not None:
+            self.root.after_cancel(self._dj_render_token)
+            self._dj_render_token = None
+        self._dj_pending = None
+        self._dj_incoming = None
         self.player.stop()
+        if self.stream_ok:
+            self.stream.stop()
         self.clock.stop()
         self.play_mode = None
         self.position_var.set("")
@@ -1402,6 +1909,8 @@ class PicoSeqApp:
                     self.roll.set_playhead(tick)
                 else:
                     self.song_view.set_playhead(tick)
+        if self.tab == "dj" and hasattr(self, "dj_view"):
+            self._dj_spin_tick()
         self.root.after(33, self._tick_playhead)
 
     def _run_bg(self, work, done, button=None):
@@ -1562,6 +2071,8 @@ class PicoSeqApp:
                 self.do_save()
         self._save_window_settings()
         self.stop_playback()
+        if self.stream_ok:
+            self.stream.close()
         self.root.destroy()
 
     def _save_window_settings(self):
@@ -1591,7 +2102,7 @@ class PicoSeqApp:
                 applied = True
             except tk.TclError:
                 pass
-        if settings.get("tab") in ("phrase", "song"):
+        if settings.get("tab") in self.TABS:
             self.switch_tab(settings["tab"], stop=False)
         self.root.update_idletasks()
         sash = settings.get("phrase_sash")
@@ -1669,6 +2180,90 @@ class PicoSeqApp:
             self.switch_tab("pattern")
             self.delete_pattern_slot(slot)
             assert not self.project.patterns[slot].used
+
+            # ソング: 長い名前の省略表示・マスのホバー説明・パターン試聴
+            self.save_current_pattern()
+            long_slot = next(i for i, pp in enumerate(self.project.patterns) if pp.used)
+            self.commit(actions.rename_pattern(self.project, long_slot,
+                                               "とても長いパターン名前"))
+            self.switch_tab("song")
+            self.select_pattern(long_slot)
+            self.song_click(2, 5)                           # 空きマスへ配置
+            fitted = self.song_view._fit_cell(self.pattern_label(long_slot))
+            assert fitted.endswith("…") and len(fitted) < len("とても長いパターン名前")
+            assert self.song_view._fit_cell("F1") == "F1"  # 短い名前はそのまま
+            self.show_song_hint(2, 5)                       # ホバー説明は名前を省略せず出す
+            assert "とても長いパターン名前" in self.cell_var.get()
+            self.clear_song_hint()
+            assert self.cell_var.get() == ""
+            self.preview_selected_pattern()                 # 選択パターンを試聴 (silent は無音)
+            self.selected_pattern = -1
+            self.preview_selected_pattern()                 # 未選択でも落ちない
+
+            # DJ モード: 生成・曲調・ノイズ・クロスフェード・KILL・自動生成・回転更新
+            from ..core.phrase import active_notes as _an_dj
+            from ..core.constants import WAVE_NOISE as _WN
+            self.switch_tab("dj")
+            self.dj_roll(0)
+            assert count_notes(self.project.phrase) > 0     # デッキから生成される
+            # 曲調をセレクタで任意に指定できる
+            self.dj_set_scale(0, "battle")
+            assert self.dj_decks[0]["scale"] == "battle"
+            self.dj_set_scale(0, "major")
+            self.dj_mood(0)                                  # おまかせ (ランダム)
+            self.dj_set_noise(0, 3)
+            noisy = sum(1 for _, n in _an_dj(self.project.phrase) if n.wave == _WN)
+            self.dj_set_noise(0, 0)
+            plain = sum(1 for _, n in _an_dj(self.project.phrase) if n.wave == _WN)
+            assert noisy > plain                            # ノイズ量で刻みが増える
+            # デッキごとに独立して設定できる (待機側をいじっても再生側は変わらない)
+            self.dj_set_tempo(1, 200)
+            self.dj_set_noise(1, 4)
+            self.dj_set_filter(1, 20)
+            self.dj_set_hold(1, True)
+            self.dj_kill(1, 0)
+            assert self.dj_decks[1]["bpm"] == 200 and self.dj_decks[0]["bpm"] != 200
+            assert self.dj_decks[1]["noise"] == 4 and self.dj_decks[0]["noise"] == 0
+            assert self.dj_decks[1]["filter"] == 20 and self.dj_decks[0]["filter"] == 100
+            assert self.dj_decks[1]["hold"] and not self.dj_decks[0]["hold"]
+            assert 0 in self.dj_decks[1]["muted"] and 0 not in self.dj_decks[0]["muted"]
+            self.dj_set_crossfade(80)
+            assert self.dj_active == 1                       # B へ切替
+            assert self.project.bpm == 200                   # B のテンポが効く
+            self.dj_set_crossfade(10)
+            assert self.dj_active == 0                       # A へ戻る
+            self.dj_kill(0, 2)
+            assert 2 in self.dj_decks[0]["muted"]            # KILL = パート消音
+            self.dj_kill(0, 2)
+            assert 2 not in self.dj_decks[0]["muted"]
+            # HOLD (ループ固定) の切替
+            self.dj_set_hold(0, True)
+            assert self.dj_decks[0]["hold"]
+            self.dj_set_hold(0, False)
+            self._dj_spin_tick()                             # 回転更新が例外なく走る
+            # 自動進行の判定 (8 小節 = 4 ループごと、手動変更は即)
+            assert not self._dj_should_swap(3, False, True, False, 4)   # まだ
+            assert self._dj_should_swap(4, False, True, False, 4)       # 4 ループで進む
+            assert not self._dj_should_swap(4, True, True, False, 4)    # HOLD 中は進まない
+            assert self._dj_should_swap(1, True, True, True, 4)         # 手動は即
+            assert not self._dj_should_swap(9, False, False, True, 4)   # 準備前は進まない
+            # フィルター: 値が変わる
+            self.dj_set_filter(0, 40)
+            assert self.dj_decks[0]["filter"] == 40
+            self.dj_set_filter(0, 100)
+            # タップテンポの計算 (0.5 秒間隔 → 120 BPM)
+            assert self._tap_bpm([0.0, 0.5]) == 120
+            assert self._tap_bpm([1.0]) is None
+            # スクラッチ: ドラッグ量 → 音の高さ (前=高い / 後=低い)、掴む・離す
+            assert self.dj_scratch_pitch(20) > self.dj_scratch_pitch(-20)
+            self.dj_scratch_start(0)
+            assert self._dj_scratching
+            self.dj_scratch_move(0, 15)
+            self.dj_scratch_end(0)
+            assert not self._dj_scratching
+            # 境界スワップ (pending 無しでも落ちない)
+            self._dj_pending = None
+            self._dj_do_swap()
 
             # パート・スライダー・各コンボの配線
             self.switch_tab("phrase")
@@ -2075,7 +2670,7 @@ def _load_demo(app):
     app.project = actions.set_seed(app.project, 7)
     app.project = actions.generate_phrase(app.project)
     app.project = actions.save_pattern(app.project, 1)
-    app.project = actions.rename_pattern(app.project, 0, "メインリフ")
+    app.project = actions.rename_pattern(app.project, 0, "メインリフレイン")  # 長い名前 (省略表示の確認用)
     app.project = actions.rename_pattern(app.project, 1, "サビ")
     app.project = actions.load_pattern(app.project, 0)
     for track, block, pid in [(0, 0, 0), (0, 1, 0), (0, 2, 1), (0, 3, 1),
@@ -2085,8 +2680,11 @@ def _load_demo(app):
     app.history = History()
     app.refresh_all()
     import os
-    if os.environ.get("PICOSEQ_DEMO_TAB") in ("song", "pattern"):
+    if os.environ.get("PICOSEQ_DEMO_TAB") in ("song", "pattern", "dj"):
         app.switch_tab(os.environ["PICOSEQ_DEMO_TAB"])
+        if os.environ["PICOSEQ_DEMO_TAB"] == "dj":
+            app.dj_set_noise(0, 2)
+            app.dj_view.update_spin("a", True, 0.8)  # 見た目確認用に回転位置をずらす
     photo_path = os.environ.get("PICOSEQ_DEMO_PHOTO")
     if photo_path:
         def open_photo():

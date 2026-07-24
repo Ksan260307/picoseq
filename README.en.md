@@ -31,6 +31,10 @@ Place notes on a grid to build a song — or start from a photo or your own humm
   onto unexpected combinations from all 65 moods
 - **🎼 Auto-song** — generates a whole Intro → A → B → Outro song structure in one click
   (each pattern gets a default name: Intro / A / B / Outro)
+- **🎧 DJ mode** — two big turntables for real-time jamming. Press ▶ and it **auto-generates a new
+  phrase every 8 bars and flows on seamlessly** (pre-rendered and swapped in on the downbeat), and you
+  can **drag a disc to scratch**. Crossfade between decks, build energy with **noise / filter / KILL**,
+  and tick **🔁 Hold** to loop the current phrase
 - **🗂 Pattern editor tab** — a dedicated tab between Phrase and Song to manage saved patterns
   (up to 8): load onto the board (edit), rename, duplicate, delete, preview
 - **🎤 From humming** — sing into the microphone and PicoSeq turns your pitch into a melody
@@ -140,10 +144,32 @@ The imported scale stays available in the mood selector as *📷 Photo Scale*.
 - **✨ Auto-song** — generates patterns 1–4 (Intro / A / B / Outro) and the full
   16-block arrangement in one click; press ▶ to hear a complete piece
 - Pick a pattern from the palette — "Placing: name" shows which — then place it on the 4-track × 16-block grid
+- **▶ Preview** plays the selected pattern once so you can check it
 - Cells show the **pattern name** (or F-number) with **block numbers** along the top;
-  cells matching the pattern you're placing are highlighted with a bright border
+  cells matching the pattern you're placing are highlighted with a bright border, and
+  long names are truncated with "…" to fit the cell
+- Hover a cell to see the full name of the pattern there in the status bar
 - Horizontal = sequence, vertical = play together
 - *WAV export* renders the whole song to an audio file
+
+**🎧 DJ mode**
+
+- A screen with two big turntables (decks A / B) for real-time jamming
+- **▶ Spin** to start, and it **auto-generates a new phrase every 8 bars and flows on with no gap**
+  (the next loop is pre-rendered in the background and swapped in **sample-accurately without
+  stopping playback**, so no silence is ever inserted)
+- Scratching and previews are **mixed over** the music, so playback never cuts out
+- **Drag a disc (with the mouse) to scratch** — it layers over the music.
+  Click a disc without moving (a tap) to generate a fresh phrase on that deck
+- The **crossfader** switches between decks A ⇄ B (cue up the other deck, then bring it in)
+- **Mood / Tempo / Noise / Filter / Hold / KILL are per-deck** channel strips, so you can set up
+  one deck while the other is playing:
+  - **Mood**: pick any of the 65 scales from the selector (🎲 Roll is the random shortcut)
+  - **Noise** (0–4): hi-hat-style ticks and build-up rolls
+  - **Filter**: sweep a low-pass (dark ⇄ open)
+  - **Hold loop**: stop advancing and loop that deck's phrase
+  - **KILL**: instantly mute a part (melody / bass / rhythm / sub)
+- Control changes apply **immediately** (no waiting for the loop boundary); **Tap** sets the tempo
 
 **Playback & sound sets**
 
@@ -161,7 +187,7 @@ The imported scale stays available in the mood selector as *📷 Photo Scale*.
 | `Space` / `Esc` | Play & stop / stop |
 | `1`–`4` | Switch part |
 | `Ctrl+Z` / `Ctrl+Y` | Undo / redo |
-| `Ctrl+Tab` | Cycle Phrase → Patterns → Song |
+| `Ctrl+Tab` | Cycle Phrase → Patterns → Song → DJ |
 | `F1` | Help |
 
 ## Under the hood (for developers)
@@ -185,6 +211,7 @@ picoseq/
 │   │   ├── project.py     the whole app state (immutable object)
 │   │   ├── actions.py     every edit operation (pure functions)
 │   │   ├── composer.py    auto-composition and accompaniment
+│   │   ├── dj.py          DJ-mode noise injection (pure functions)
 │   │   ├── arranger.py    chord inference from a melody
 │   │   ├── humming.py     pitch detection (autocorrelation, integer math)
 │   │   ├── schedule.py    timing and event expansion
@@ -204,12 +231,14 @@ picoseq/
 │       ├── panel.py       detachable dock panels (wm manage/forget)
 │       ├── roll_view.py   piano roll (zoom + horizontal scroll)
 │       ├── song_view.py   song grid
+│       ├── dj_view.py     DJ mode (turntables + mixer)
 │       ├── photo.py       photo-scale dialog
 │       ├── hum.py         humming dialog
 │       ├── mic.py         microphone recording (native Windows API)
 │       ├── help.py        help screen (JP/EN)
 │       ├── i18n.py        display language (Japanese / English)
 │       ├── playback.py    playback, position clock, mid-loop restart
+│       ├── stream.py      streaming output (waveOut): gapless swaps + one-shot mixing
 │       ├── storage.py     file locations + app settings (language, zoom, window)
 │       └── theme.py       colors and fonts
 └── tests/                 test suite (py -m unittest)

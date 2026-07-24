@@ -5,6 +5,7 @@
 """
 
 import tkinter as tk
+from tkinter import font as tkfont
 
 from ..core.constants import EMPTY_CELL, SONG_BLOCKS, SONG_TRACKS
 from ..core.project import steps_of
@@ -13,19 +14,17 @@ from . import theme
 
 TOP = 18       # 上端: ブロック番号ルーラー
 MARGIN = 34    # 左端: トラック名
-CELL_W = 54
+CELL_W = 58
 CELL_H = 44
+CELL_PAD = 8   # セル内テキストの左右余白 (この幅に収まるよう省略する)
 WIDTH = MARGIN + CELL_W * SONG_BLOCKS
 HEIGHT = TOP + CELL_H * SONG_TRACKS
-
-
-def _fit(text: str, max_chars: int = 7) -> str:
-    return text if len(text) <= max_chars else text[:max_chars - 1] + "…"
 
 
 class SongView:
     def __init__(self, parent, app):
         self.app = app
+        self.cell_font = tkfont.Font(font=theme.FONT_SMALL)
         self.frame = tk.Frame(parent, bg=theme.PANEL)
         self.canvas = tk.Canvas(
             self.frame, width=WIDTH, height=HEIGHT,
@@ -35,7 +34,20 @@ class SongView:
         self.canvas.pack()
         self.canvas.bind("<Button-1>", self._on_press)
         self.canvas.bind("<Button-3>", self._on_right_press)
+        self.canvas.bind("<Motion>", self._on_motion)
+        self.canvas.bind("<Leave>", lambda e: self.app.clear_song_hint())
         self.rebuild()
+
+    def _fit_cell(self, text: str) -> str:
+        """セル幅に収まるよう、はみ出す分を「…」に置き換える (全角も実幅で判定)。"""
+        max_px = CELL_W - CELL_PAD
+        if self.cell_font.measure(text) <= max_px:
+            return text
+        for i in range(len(text) - 1, 0, -1):
+            candidate = text[:i] + "…"
+            if self.cell_font.measure(candidate) <= max_px:
+                return candidate
+        return "…"
 
     def rebuild(self):
         canvas = self.canvas
@@ -88,7 +100,7 @@ class SongView:
                 canvas.create_rectangle(x + 2, y + 2, x + CELL_W - 2, y + CELL_H - 2,
                                         fill=color, outline=outline, width=width,
                                         tags="cell")
-                label = _fit(self.app.pattern_label(pattern_id))
+                label = self._fit_cell(self.app.pattern_label(pattern_id))
                 canvas.create_text(x + CELL_W // 2, y + CELL_H // 2, text=label,
                                    font=theme.FONT_SMALL, fill=theme.KEY_TEXT,
                                    tags="cell")
@@ -127,3 +139,10 @@ class SongView:
         cell = self._cell_at(event)
         if cell:
             self.app.song_erase(*cell)
+
+    def _on_motion(self, event):
+        cell = self._cell_at(event)
+        if cell:
+            self.app.show_song_hint(*cell)
+        else:
+            self.app.clear_song_hint()

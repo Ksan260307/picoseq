@@ -34,6 +34,15 @@ SECTIONS_JA = [
                               "▶ で試聴する — がその場でできます。"),
         ("★ 登録 / ＋ 保存", "気に入ったフレーズは フレーズ画面の ★ 登録、または パターン画面の空きスロットへ保存。"),
     ]),
+    ("🎧 DJ モード", [
+        ("回して流す", "▶ で開始すると、8 小節ごとに次のフレーズを自動生成して継ぎ目なく流し続けます"
+                     "(次ループを裏で先に用意し、ループの境目で滑らかに差し替え)。"),
+        ("🔁 ループ固定", "チェックを入れると自動で進まず、現在のフレーズをループし続けます。"),
+        ("スクラッチ", "ディスクをドラッグ (マウス) するとスクラッチできます。掴むと止まり、離すと再開。"
+                    "動かさずにクリック (タップ) すると、そのデッキで新しいフレーズを生成します。"),
+        ("クロスフェーダー", "デッキ A ⇄ B を切り替え。別の曲調のデッキを仕込んで展開できます。"),
+        ("ノイズ / フィルター / KILL", "ノイズや掃引フィルターで盛り上げ、KILL で各パートを即消音。タップでテンポ合わせ。"),
+    ]),
     ("🧩 曲を組み立てる (ソング)", [
         ("ソング自動作成", "1 曲ぶんの構成 (イントロ→Aメロ→Bメロ→アウトロ) をワンボタンで作ります。"
                          "パターン 1〜4 とソング構成が丸ごと入れ替わります。"),
@@ -88,6 +97,15 @@ SECTIONS_EN = [
                                               "duplicate it, delete it, or preview with ▶ — right there."),
         ("★ Save / ＋ Save here", "Save a phrase with ★ on the Phrase screen, or into an empty slot on the Pattern screen."),
     ]),
+    ("🎧 DJ mode", [
+        ("Spin & flow", "Press ▶ and it auto-generates a new phrase every 8 bars and flows on with no gap "
+                        "(the next loop is pre-rendered and swapped in on the downbeat)."),
+        ("🔁 Hold", "Tick it to stop advancing and loop the current phrase instead."),
+        ("Scratch", "Drag a disc (with the mouse) to scratch — grabbing pauses, releasing resumes. "
+                    "Click without moving (a tap) to generate a fresh phrase on that deck."),
+        ("Crossfader", "Switch between decks A ⇄ B — cue up a different-mood deck, then bring it in."),
+        ("Noise / Filter / KILL", "Add noise or sweep a filter to build energy; KILL instantly mutes a part. Tap sets tempo."),
+    ]),
     ("🧩 Build a song", [
         ("Auto song", "Builds a full arrangement (Intro→A→B→Outro) with one button. "
                       "Patterns 1-4 and the song are wholly replaced."),
@@ -118,7 +136,7 @@ SHORTCUTS_JA = [
     ("Esc", "停止"),
     ("1〜4", "パート切替"),
     ("Ctrl+Z / Y", "元に戻す / やり直す"),
-    ("Ctrl+Tab", "フレーズ → パターン → ソング"),
+    ("Ctrl+Tab", "フレーズ → パターン → ソング → DJ"),
     ("F1", "このヘルプ"),
 ]
 
@@ -127,7 +145,7 @@ SHORTCUTS_EN = [
     ("Esc", "Stop"),
     ("1-4", "Switch part"),
     ("Ctrl+Z / Y", "Undo / Redo"),
-    ("Ctrl+Tab", "Phrase → Patterns → Song"),
+    ("Ctrl+Tab", "Phrase → Patterns → Song → DJ"),
     ("F1", "This help"),
 ]
 
