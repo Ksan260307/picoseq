@@ -207,6 +207,25 @@ class TestStyles(unittest.TestCase):
         for chosen, count in zip(seen, counts):
             self.assertEqual(len(chosen), count)
 
+    def test_style_combinations_expanded_about_sixfold(self):
+        """演奏スタイルの組み合わせを大幅拡張した (旧 2,160 通りの約 6 倍)。"""
+        from picoseq.core.composer import (
+            BACKING_STYLES,
+            BASS_STYLES,
+            DRUM_STYLES,
+            MELODY_RHYTHMS,
+            MOTIF_MODES,
+        )
+        combos = (BASS_STYLES * BACKING_STYLES * DRUM_STYLES
+                  * MELODY_RHYTHMS * MOTIF_MODES)
+        self.assertGreaterEqual(combos, 13000)      # 旧 2160 の約 6.3 倍
+        # 各パートの型数が増えている (退化していない)
+        self.assertGreaterEqual(BASS_STYLES, 9)
+        self.assertGreaterEqual(BACKING_STYLES, 7)
+        self.assertGreaterEqual(DRUM_STYLES, 9)
+        self.assertGreaterEqual(MELODY_RHYTHMS, 6)
+        self.assertGreaterEqual(MOTIF_MODES, 4)
+
 
 if __name__ == "__main__":
     unittest.main()

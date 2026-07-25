@@ -79,6 +79,13 @@ def envelope_segments(wave: int, total: int, rate: int,
     return [(attack, peak), (rest, 0)]
 
 
+# ベースの倍音バランス (Q8, 256=等倍)。基音 (≈30–60Hz) はほとんど聞こえず、
+# 音量ピークだけを食う。基音を少し下げて空いたヘッドルームを可聴域の倍音へ回すと、
+# 全体のピークをほぼ変えずに「聞こえるベース」になる (擬似ベース強調)。
+TRI_SUB = 205           # ×1 基音 (÷2 済み)。控えめにしてピークを抑える
+TRI_HARMONIC = 120      # ×2 (≈65–120Hz): 低音の下支え
+TRI_HARMONIC2 = 84      # ×4 (≈130–250Hz): 小型スピーカーでも聞こえる芯
+
 # 音色セットごとのフィルタ開き具合 (三角波 / ノコギリ波)
 _TRI_CUTOFF = {"retro8": (300, 30), "warm16": (300, 30), "clear32": (600, 60)}
 _SAW_CUTOFF = {"retro8": (500, 50), "warm16": (300, 25), "clear32": (900, 80)}
@@ -117,7 +124,17 @@ def _render_raw(wave, pitch, total, tone, rate, sound):
         raw = _render_pulse(total, inc, duty_tone)
     elif wave == WAVE_TRIANGLE:
         base, slope = _TRI_CUTOFF[sound]
-        raw = _render_filtered(total, inc, _oscillate_triangle, base + tone * slope, rate)
+        cutoff = base + tone * slope
+        raw = _render_filtered(total, inc, _oscillate_triangle, cutoff, rate)
+        # ベースの基音 (≈30–60Hz) は小型スピーカーではほとんど鳴らず、耳の感度も低い。
+        # 深い土台は残したまま、1・2 オクターブ上の倍音を重ねて可聴域に「芯」を作る
+        # (擬似ベース強調)。書かれた音の高さは millihz*2 (÷2 済みのため)。
+        oct1 = _render_filtered(total, phase_increment(millihz * 2, rate),
+                                _oscillate_triangle, cutoff * 2, rate)
+        oct2 = _render_filtered(total, phase_increment(millihz * 4, rate),
+                                _oscillate_triangle, cutoff * 4, rate)
+        raw = [(a * TRI_SUB >> 8) + (b * TRI_HARMONIC >> 8) + (c * TRI_HARMONIC2 >> 8)
+               for a, b, c in zip(raw, oct1, oct2)]
     else:
         base, slope = _SAW_CUTOFF[sound]
         raw = _render_filtered(total, inc, _oscillate_saw, base + tone * slope, rate)

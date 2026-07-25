@@ -88,6 +88,9 @@ class StreamPlayer:
         self._oneshots = []      # [[array, 読み位置], ...]
         self.loops = 0           # ループが一周した回数
         self.switches = 0        # 次のループへ乗り換えた回数
+        self._rec = None         # 録音中なら送出チャンクを溜めるリスト
+        self._rec_bytes = 0
+        self._rec_max = rate * 2 * 60 * 20  # 上限 20 分ぶん (暴走防止)
 
     # ---- 開閉 ----
 
@@ -190,6 +193,26 @@ class StreamPlayer:
             self._pos = 0
             self._oneshots = []
 
+    # ---- 録音 (送出しているミックスをそのまま捕まえる) ----
+
+    def start_record(self):
+        """今この瞬間から、実際に鳴っている音 (乗り換え・スクラッチ込み) を溜め始める。"""
+        with self._lock:
+            self._rec = []
+            self._rec_bytes = 0
+
+    def stop_record(self) -> bytes:
+        """録音を止めて、溜めた 16bit PCM を 1 本のバイト列で返す。"""
+        with self._lock:
+            data = b"".join(self._rec) if self._rec else b""
+            self._rec = None
+            self._rec_bytes = 0
+        return data
+
+    @property
+    def is_recording(self) -> bool:
+        return self._rec is not None
+
     @property
     def playing(self) -> bool:
         return self._loop is not None
@@ -249,4 +272,9 @@ class StreamPlayer:
                     if shot[1] < len(shot[0]):
                         alive.append(shot)
                 self._oneshots = alive
-        return chunk.tobytes()
+            out = chunk.tobytes()
+            # 録音中なら、送り出すそのままを捕まえる (聞こえた通りに残る)
+            if self._rec is not None and self._rec_bytes < self._rec_max:
+                self._rec.append(out)
+                self._rec_bytes += len(out)
+        return out

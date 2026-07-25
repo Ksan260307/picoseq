@@ -36,6 +36,11 @@ def save_text(path: Path, text: str):
     path.write_text(text, encoding="utf-8")
 
 
+def save_bytes(path: Path, data: bytes):
+    """任意のパスへバイト列を書き出す (録音 WAV の保存など)。"""
+    Path(path).write_bytes(data)
+
+
 def load_text(path: Path):
     """ファイルの中身。無い・読めないときは None。"""
     try:

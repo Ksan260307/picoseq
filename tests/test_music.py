@@ -79,6 +79,15 @@ class TestProgressionLibrary(unittest.TestCase):
         total = sum(len(p) for p in SCALE_PROGRESSIONS.values())
         self.assertGreaterEqual(total, 10000)  # 全曲調あわせて 1 万通り超
 
+    def test_library_was_expanded_about_fivefold(self):
+        """進行ライブラリを大幅拡張した (旧 27,480 通りの約 4 倍以上)。"""
+        total = sum(len(p) for p in SCALE_PROGRESSIONS.values())
+        self.assertGreaterEqual(total, 110000)     # 旧比 約 4.4 倍
+        # 7 音音階は理論上限 (7^4=2401) まで使い切る
+        seven = next(sid for sid in SCALE_IDS
+                     if len(SCALES[sid]["intervals"]) == 7)
+        self.assertGreaterEqual(len(SCALE_PROGRESSIONS[seven]), 2000)
+
     def test_all_degrees_in_range(self):
         for scale_id, progs in SCALE_PROGRESSIONS.items():
             n = len(SCALES[scale_id]["intervals"])

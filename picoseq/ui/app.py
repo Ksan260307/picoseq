@@ -14,17 +14,20 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from ..core import actions
+from ..core import dj as dj_core
 from ..core.constants import (
     BPM_MAX,
     BPM_MIN,
     EMPTY_CELL,
     MAX_NOTES,
+    PART_COUNT,
     PATTERN_COUNT,
     PITCH_MAX,
     PITCH_MIN,
     SAMPLE_RATE,
     SEED_MAX,
     SEED_MIN,
+    WAVE_PULSE,
 )
 from ..core.history import History, record, redo, undo
 from ..core.music import KEY_NAMES, SCALE_IDS, SCALES, note_name
@@ -60,6 +63,8 @@ LIVE_DEBOUNCE_MS = 140  # 演奏中の編集をまとめて再レンダリング
 DJ_RENDER_DEBOUNCE_MS = 120  # DJ: 次ループの事前レンダリングをまとめる間隔
 DJ_ADVANCE_LOOPS = 4    # DJ: 何ループ流したら自動で次へ進むか (2小節×4 = 8小節)
 DJ_SCRATCH_MS = 45      # スクラッチ音の最短間隔 (ミリ秒)
+DJ_HISTORY_COMMIT_MS = 800  # つまみ操作を履歴へ確定するまでの待ち (デバウンス)
+SURPRISE_BPM = (80, 180)    # サプライズのテンポの振れ幅 (極端に速い/遅いを避ける)
 
 
 class PicoSeqApp:
@@ -73,11 +78,20 @@ class PicoSeqApp:
         self.muted = set()  # 消音中の (wave, layer) の集合。再生・WAV に反映
         self.roll_zoom = 1.0  # ピアノロールの拡大率 (画面再構築後も保つ)
         self.selected_pattern = -1
-        # DJ モード: 2 デッキ。曲調・テンポ・ノイズ・フィルター・固定・消音はデッキごとに独立。
-        self.dj_decks = [self._new_dj_deck(self.project.scale, self.project.seed,
-                                           self.project.bpm),
-                         self._new_dj_deck("battle", 2, self.project.bpm)]
+        # DJ モード: 2 デッキ。曲調・キー・音色・テンポ・ノイズ・フィルター・固定・消音は
+        # すべてデッキごとに独立。
+        self.dj_decks = [
+            self._new_dj_deck(self.project.scale, self.project.seed,
+                              self.project.bpm, self.project.key, self.project.sound),
+            self._new_dj_deck(self.project.scale, 2,
+                              self.project.bpm, self.project.key, self.project.sound),
+        ]
         self.dj_active = 0
+        self.dj_history = []        # 流したフレーズ (新しい順)。再起動では持ち越さない
+        self._dj_hist_token = None  # つまみ操作を履歴へ確定するデバウンス
+        self._dj_recording = False  # セット録音中か
+        self.dj_favorites = dj_core.sanitize_entries(
+            storage.load_settings().get("dj_favorites", []))   # ★ は設定へ永続化する
         self._dj_last_pos = 0.0
         self._dj_loop_count = 0     # 現フレーズを何ループ流したか
         self._dj_want_seed = self.dj_decks[0]["seed"]  # 次に流すフレーズのシード
@@ -972,26 +986,45 @@ class PicoSeqApp:
                           prog=self._progression_text()))
 
     def generate_surprise(self):
-        """サプライズ — 曲調・音色・シード値をまるごとランダムに選んで作る。
+        """サプライズ — 曲調・音色・テンポ・シードに加え、各パートの音色・長さも丸ごとランダムに。
 
         65 種類の曲調から思いがけない組み合わせに出会うための一発ボタン。
+        テンポも、パートごとの音色 (パルス幅など) と長さ (ゲート) も振るので、毎回別物になる。
         """
         scale = random.choice(SCALE_IDS)
         sound = random.choice(theme.SOUND_IDS)
+        bpm = random.randint(*SURPRISE_BPM)
         seed = random.randint(SEED_MIN, SEED_MAX)
         p = self.project
         # フォト音階は写真が要るので通常の曲調から選ぶ (SCALE_IDS は通常のみ)
         p = actions.set_scale(p, scale)
         p = actions.set_sound(p, sound)
+        p = actions.set_bpm(p, bpm)
         p = actions.set_seed(p, seed)
         p = actions.generate_phrase(p)
+        p = self._randomize_voicing(p)     # 各パートの音色・長さもランダムに
         self.commit(p, full=True)
         self._ensure_theme()  # 選ばれた音色に配色を合わせる
         from ..core.music import SCALES as _SCALES
         self.set_status(t("st_surprise",
                           scale=i18n.scale_label(scale, _SCALES[scale]["label"]),
-                          sound=i18n.sound_label(sound), seed=seed,
+                          sound=i18n.sound_label(sound), bpm=bpm, seed=seed,
                           prog=self._progression_text()))
+
+    @staticmethod
+    def _randomize_voicing(project):
+        """各パート・各レイヤーの音色 (0..100) と長さ (10..100) をランダムに振る。
+
+        音を決めるのは音符 (シード由来) のままで、質感だけを変える。極端すぎて
+        鳴りにくくならないよう、長さは 25 以上に寄せる。
+        """
+        for wave in range(PART_COUNT):
+            for layer in range(layer_count(project, wave)):
+                project = actions.set_part_tone(project, wave,
+                                                random.randint(0, 100), layer)
+                project = actions.set_part_gate(project, wave,
+                                                random.randint(25, 100), layer)
+        return project
 
     def arrange_accompaniment(self):
         """盤面のメロディに合わせて他パート (ベース・サブ・リズム) を自動生成する。"""
@@ -1334,9 +1367,14 @@ class PicoSeqApp:
     # ==============================
 
     @staticmethod
-    def _new_dj_deck(scale, seed, bpm):
-        """デッキ 1 台ぶんの設定 (曲調・シード・テンポ・ノイズ・フィルター・固定・消音)。"""
-        return {"scale": scale, "seed": seed, "bpm": bpm, "noise": 0,
+    def _new_dj_deck(scale, seed, bpm, key=0, sound="retro8"):
+        """デッキ 1 台ぶんの設定。
+
+        tones/gates = パートごと (メロディ/ベース/リズム/サブ) の音色と長さ。
+        音色 0..100 (メロディならパルス波のデューティ比)、長さ 10..100。
+        """
+        return {"scale": scale, "key": key, "sound": sound, "seed": seed, "bpm": bpm,
+                "noise": 0, "tones": [50, 50, 50, 50], "gates": [80, 80, 80, 80],
                 "filter": 100, "hold": False, "muted": set()}
 
     def _dj_scale_label(self, scale_id) -> str:
@@ -1363,6 +1401,7 @@ class PicoSeqApp:
             return
         self.dj_view.sync_crossfade(self.dj_active)
         self._update_dj_decks()
+        self._refresh_dj_log()
 
     def _update_dj_decks(self):
         for i, key in enumerate(("a", "b")):
@@ -1371,15 +1410,20 @@ class PicoSeqApp:
                                    active=(i == self.dj_active))
         self.dj_view.set_play(self.play_mode == "phrase")
 
-    def _dj_project_for(self, seed):
-        """アクティブデッキの設定 (曲調・テンポ・ノイズ) でループ Project を作る。"""
-        deck = self._dj_deck()
+    def _dj_project_for(self, seed, deck=None):
+        """デッキの設定 (曲調・キー・音色・テンポ・ノイズ) でループ Project を作る。"""
+        deck = self._dj_deck(deck)
         p = actions.set_scale(self.project, deck["scale"])
+        p = actions.set_key(p, deck["key"])
+        p = actions.set_sound(p, deck["sound"])
         p = actions.set_bpm(p, deck["bpm"])
         p = actions.set_seed(p, seed)
         p = actions.generate_phrase(p)
+        for wave in range(PART_COUNT):              # パートごとの音色・長さ (全レイヤーに適用)
+            for layer in range(layer_count(p, wave)):
+                p = actions.set_part_tone(p, wave, deck["tones"][wave], layer)
+                p = actions.set_part_gate(p, wave, deck["gates"][wave], layer)
         if deck["noise"] > 0:
-            from ..core import dj as dj_core
             from ..core.phrase import active_notes, build_phrase
             notes = [n for _, n in active_notes(p.phrase)]
             notes = dj_core.add_noise(notes, p.beats, deck["noise"], seed)
@@ -1433,7 +1477,8 @@ class PicoSeqApp:
     def _dj_signature(self):
         """次ループを決めるパラメータの指紋 (準備中に変わったか判定する)。"""
         deck = self._dj_deck()
-        return (self._dj_want_seed, deck["scale"], deck["bpm"], deck["noise"],
+        return (self._dj_want_seed, deck["scale"], deck["key"], deck["sound"],
+                deck["bpm"], deck["noise"], tuple(deck["tones"]), tuple(deck["gates"]),
                 deck["filter"], tuple(sorted(deck["muted"])), self.dj_active)
 
     def _dj_render_next(self):
@@ -1514,6 +1559,7 @@ class PicoSeqApp:
         self._dj_loop_count = 0
         self.clock.start(ticks * tick_seconds(bpm), offset_seconds=0.0)
         self._update_dj_decks()
+        self._dj_record_history()          # 自動進行で次のフレーズが流れ始めた
 
     @staticmethod
     def _dj_should_swap(loop_count, hold, has_pending, swap_soon, advance_loops):
@@ -1538,6 +1584,7 @@ class PicoSeqApp:
         self._dj_last_pos = 0.0
         self.start_playback("phrase")
         self.dj_view.set_play(True)
+        self._dj_record_history()
 
     def dj_roll(self, deck):
         seed = random.randint(SEED_MIN, SEED_MAX)
@@ -1548,6 +1595,7 @@ class PicoSeqApp:
             else:
                 self.project = self._dj_project_for(seed)  # 停止中は即差し替え
         self._update_dj_decks()
+        self._dj_record_history(deck)
         self.set_status(t("st_dj_rolled", deck="AB"[deck], seed=seed))
 
     def _dj_changed(self, deck, reseed=False):
@@ -1563,19 +1611,221 @@ class PicoSeqApp:
         else:
             self.project = self._dj_project_for(self.dj_decks[deck]["seed"])
         self._update_dj_decks()
+        self._dj_history_schedule(deck)      # つまみ操作も履歴に残す (デバウンス)
 
     def dj_set_scale(self, deck, scale_id):
-        """デッキの曲調を選ぶ (セレクタから)。"""
+        """デッキの曲調を選ぶ (セレクタから)。フレーズの骨格は保つ (シードは変えない)。"""
         if scale_id not in SCALE_IDS or self.dj_decks[deck]["scale"] == scale_id:
             return
         self.dj_decks[deck]["scale"] = scale_id
-        self._dj_changed(deck, reseed=True)
+        self._dj_changed(deck)
         self.set_status(t("st_dj_mood", deck="AB"[deck],
                           mood=self._dj_scale_label(scale_id)))
+
+    def dj_set_key(self, deck, key):
+        """デッキのキーを選ぶ (0=C .. 11=B)。同じフレーズを別のキーで鳴らす。"""
+        key = max(0, min(11, int(key)))
+        if key == self.dj_decks[deck]["key"]:
+            return
+        self.dj_decks[deck]["key"] = key
+        self._dj_changed(deck)
+        self.set_status(t("st_dj_key", deck="AB"[deck], key=KEY_NAMES[key]))
+
+    def dj_set_sound(self, deck, sound):
+        """デッキの音色を選ぶ。
+
+        フレーズ画面の音色と違い、**画面の配色は変えない**。演奏中に全体が
+        作り直されるとディスクが飛ぶうえ、デッキごとに別の音色を持てなくなるため。
+        """
+        if sound not in theme.SOUND_IDS or self.dj_decks[deck]["sound"] == sound:
+            return
+        self.dj_decks[deck]["sound"] = sound
+        self._dj_changed(deck)
+        self.set_status(t("st_dj_sound", deck="AB"[deck], label=i18n.sound_label(sound)))
 
     def dj_mood(self, deck):
         """曲調をランダムに選び直す (おまかせ)。"""
         self.dj_set_scale(deck, random.choice(SCALE_IDS))
+
+    def dj_sync(self, deck):
+        """このデッキを、もう一方のデッキへ合わせる (テンポ・キー)。
+
+        DJ の SYNC と同じ発想。曲調・音色・フレーズはそのままなので、
+        「別の曲調のまま拍とキーだけ揃えて重ねる」ことができる。
+        """
+        other = self.dj_decks[1 - deck]
+        target, key = other["bpm"], other["key"]
+        if self.dj_decks[deck]["bpm"] == target and self.dj_decks[deck]["key"] == key:
+            self.set_status(t("st_dj_sync_same", deck="AB"[deck]))
+            return
+        self.dj_decks[deck]["bpm"] = target
+        self.dj_decks[deck]["key"] = key
+        self._dj_changed(deck)
+        self.set_status(t("st_dj_sync", deck="AB"[deck], bpm=target, key=KEY_NAMES[key]))
+
+    # ---- 履歴・お気に入り ----
+
+    def _dj_entry(self, deck=None):
+        """今のデッキ設定を、履歴・お気に入り用のエントリにする。"""
+        index = self.dj_active if deck is None else deck
+        state = self.dj_decks[index]
+        return dj_core.make_entry(state["scale"], state["key"], state["bpm"],
+                                  state["sound"], state["noise"], state["seed"],
+                                  tones=state["tones"], gates=state["gates"], deck=index)
+
+    def _dj_record_history(self, deck=None):
+        """フレーズが**流れ始めた**ところで履歴へ残す (自動進行・生成・デッキ切替)。"""
+        self.dj_history = dj_core.push_history(self.dj_history, self._dj_entry(deck))
+        self._refresh_dj_log()
+
+    def _dj_history_schedule(self, deck=None):
+        """つまみ操作を、少し待ってから履歴へ確定する (デバウンス)。
+
+        スライダーを動かすと値ごとにコールバックが飛ぶので、そのたびに履歴へ
+        積むと中間値で埋まる。操作が落ち着いてから 1 つだけ確定させる。
+        確定した状態は新しい行として残る (元の状態も履歴に残るので後で戻せる)。
+        """
+        self._dj_hist_deck = self.dj_active if deck is None else deck
+        if self._dj_hist_token is not None:
+            self.root.after_cancel(self._dj_hist_token)
+        self._dj_hist_token = self.root.after(DJ_HISTORY_COMMIT_MS,
+                                              self._dj_history_commit)
+
+    def _dj_history_commit(self):
+        """デバウンス後、今の設定を履歴へ確定する。"""
+        self._dj_hist_token = None
+        self._dj_record_history(getattr(self, "_dj_hist_deck", None))
+
+    def _dj_history_flush(self):
+        """保留中のデバウンスを即確定する (テスト・タブ離脱時など)。"""
+        if self._dj_hist_token is not None:
+            self.root.after_cancel(self._dj_hist_token)
+            self._dj_history_commit()
+
+    def _refresh_dj_log(self):
+        if hasattr(self, "dj_view"):
+            self.dj_view.sync_log(self.dj_history, self.dj_favorites)
+
+    def dj_entry_label(self, entry) -> str:
+        """履歴・お気に入り 1 行ぶんの表示 (曲調 / キー / テンポ / 音色)。"""
+        return t("dj_entry", mood=self._dj_scale_label(entry["scale"]),
+                 key=KEY_NAMES[max(0, min(11, entry["key"]))], bpm=entry["bpm"],
+                 sound=i18n.sound_label(entry["sound"]))
+
+    def dj_toggle_favorite(self, entry=None):
+        """エントリ (既定は今流している音) をお気に入りに登録／解除する。"""
+        entry = self._dj_entry() if entry is None else entry
+        self.dj_favorites, added = dj_core.toggle_favorite(self.dj_favorites, entry)
+        settings = storage.load_settings()
+        settings["dj_favorites"] = self.dj_favorites
+        storage.save_settings(settings)          # ★ は再起動後も残る
+        self._refresh_dj_log()
+        self.set_status(t("st_dj_fav_add") if added else t("st_dj_fav_remove"))
+        return added
+
+    def dj_clear_history(self):
+        """履歴を空にする (お気に入りは消さない)。つまみ操作で溜まった分を掃除する。"""
+        self.dj_history = []
+        self._refresh_dj_log()
+        self.set_status(t("st_dj_hist_cleared"))
+
+    def dj_clear_favorites(self):
+        """お気に入りを空にする (設定ファイルからも消す)。"""
+        self.dj_favorites = []
+        settings = storage.load_settings()
+        settings["dj_favorites"] = []
+        storage.save_settings(settings)
+        self._refresh_dj_log()
+        self.set_status(t("st_dj_fav_cleared"))
+
+    def dj_record_toggle(self):
+        """セット録音の開始／停止。停止時に WAV として保存する。
+
+        録音するのはストリームが実際に送り出しているミックスそのもの
+        (乗り換え・スクラッチ・ノイズ込み)。聞こえた通りに 1 本の WAV になる。
+        """
+        if self.silent or not self.stream_ok:
+            self.alert(t("st_dj_rec_unavailable"))
+            return
+        if not self._dj_recording:
+            self.stream.start_record()
+            self._dj_recording = True
+            self.dj_view.set_recording(True)
+            self.set_status(t("st_dj_rec_start"))
+            return
+        pcm = self.stream.stop_record()
+        self._dj_recording = False
+        self.dj_view.set_recording(False)
+        self._dj_save_recording(pcm)
+
+    def _dj_save_recording(self, pcm):
+        if not pcm:
+            self.set_status(t("st_dj_rec_empty"))
+            return
+        seconds = len(pcm) // (SAMPLE_RATE * 2)
+        path = filedialog.asksaveasfilename(
+            title=t("dj_rec_save_title"), defaultextension=".wav",
+            initialfile=t("dj_rec_filename"),
+            filetypes=[("WAV", "*.wav")])
+        if not path:
+            self.set_status(t("st_dj_rec_discarded"))
+            return
+        try:
+            storage.save_bytes(Path(path), wav_bytes(pcm))
+        except OSError as exc:
+            self.alert(t("st_dj_rec_error", error=exc))
+            return
+        self.set_status(t("st_dj_rec_saved", sec=seconds))
+
+    def dj_recall(self, entry, deck=None):
+        """履歴・お気に入りのフレーズを、指定デッキ (既定はアクティブ) へ呼び戻す。"""
+        index = self.dj_active if deck is None else deck
+        state = self.dj_decks[index]
+        state["scale"] = entry["scale"] if entry["scale"] in SCALE_IDS else state["scale"]
+        state["key"] = max(0, min(11, entry["key"]))
+        state["bpm"] = max(BPM_MIN, min(BPM_MAX, entry["bpm"]))
+        state["noise"] = max(0, min(4, entry["noise"]))
+        clean = dj_core.sanitize_entries([entry])[0]   # tones/gates を 4 個・整数に整える
+        state["tones"] = [max(0, min(100, v)) for v in clean["tones"]]
+        state["gates"] = [max(10, min(100, v)) for v in clean["gates"]]
+        if entry["sound"] in theme.SOUND_IDS:
+            state["sound"] = entry["sound"]
+        state["seed"] = entry["seed"]
+        # 呼び戻したものが勝手に流れ去らないよう、そのデッキをループ固定にする
+        state["hold"] = True
+        self._dj_changed(index)
+        self.set_status(t("st_dj_recall", deck="AB"[index],
+                          label=self.dj_entry_label(entry)))
+
+    def dj_keep(self, entry=None):
+        """エントリのフレーズを、空いているパターンスロットへ保存する。
+
+        DJ で偶然できた良いフレーズを、フレーズ／ソング画面へ持って行くための出口。
+        """
+        entry = self._dj_entry() if entry is None else entry
+        slot = actions.free_pattern_slot(self.project)
+        if slot < 0:
+            self.alert(t("st_dj_keep_full"))
+            return -1
+        saved = self._dj_deck()
+        keys = ("scale", "key", "sound", "bpm", "noise", "tones", "gates")
+        backup = {k: saved[k] for k in keys}
+        clean = dj_core.sanitize_entries([entry])[0]
+        try:                                       # 一時的にエントリの設定で組み立てる
+            saved.update({k: entry[k] for k in ("scale", "key", "sound", "bpm", "noise")})
+            saved["tones"] = list(clean["tones"])
+            saved["gates"] = list(clean["gates"])
+            project = self._dj_project_for(entry["seed"])
+        finally:
+            saved.update(backup)
+        name = t("dj_keep_name", mood=self._dj_scale_label(entry["scale"]),
+                 bpm=entry["bpm"])                 # 名前欄は 24 文字なので短く
+        project = actions.save_pattern(project, slot, name)
+        # 盤面 (フレーズ) は今のまま、パターン欄だけ増やす
+        self.commit(actions.update(self.project, patterns=project.patterns))
+        self._rebuild_pattern_list()
+        self.set_status(t("st_dj_keep", n=slot + 1))
+        return slot
 
     def dj_set_crossfade(self, value):
         new_active = 0 if value < 50 else 1
@@ -1587,6 +1837,7 @@ class PicoSeqApp:
         else:
             self.project = self._dj_project_for(self.dj_decks[new_active]["seed"])
         self._update_dj_decks()
+        self._dj_record_history()          # 反対のデッキが表に出た
         self.set_status(t("st_dj_switch", deck="AB"[new_active]))
 
     def dj_set_hold(self, deck, on):
@@ -1601,6 +1852,32 @@ class PicoSeqApp:
         self.dj_decks[deck]["noise"] = level
         self._dj_changed(deck)
         self.set_status(t("st_dj_noise", level=level))
+
+    def dj_set_part_tone(self, deck, wave, tone):
+        """パートの音色を変える (0..100)。メロディならパルス波のデューティ比。
+
+        フレーズの音符は変えず音色だけが変わるので、同じフレーズのまま
+        各パートの質感 (細い電子音 ⇄ 太い矩形波 など) を作り込める。
+        """
+        wave = max(0, min(PART_COUNT - 1, int(wave)))
+        tone = max(0, min(100, int(tone)))
+        if tone == self.dj_decks[deck]["tones"][wave]:
+            return
+        self.dj_decks[deck]["tones"][wave] = tone
+        self._dj_changed(deck)
+        self.set_status(t("st_dj_part_tone", deck="AB"[deck],
+                          part=i18n.part_name(wave), tone=tone))
+
+    def dj_set_part_gate(self, deck, wave, gate):
+        """パートの長さ (ゲート 10..100) を変える。短いほど歯切れよく、長いほど伸びる。"""
+        wave = max(0, min(PART_COUNT - 1, int(wave)))
+        gate = max(10, min(100, int(gate)))
+        if gate == self.dj_decks[deck]["gates"][wave]:
+            return
+        self.dj_decks[deck]["gates"][wave] = gate
+        self._dj_changed(deck)
+        self.set_status(t("st_dj_part_gate", deck="AB"[deck],
+                          part=i18n.part_name(wave), gate=gate))
 
     def dj_set_filter(self, deck, level):
         level = max(0, min(100, int(level)))
@@ -2206,10 +2483,16 @@ class PicoSeqApp:
             self.switch_tab("dj")
             self.dj_roll(0)
             assert count_notes(self.project.phrase) > 0     # デッキから生成される
-            # 曲調をセレクタで任意に指定できる
+            # 曲調・キーをセレクタで任意に指定できる (どちらも既定はメジャー/C)
+            assert self.dj_decks[0]["scale"] == self.dj_decks[1]["scale"] == "major"
             self.dj_set_scale(0, "battle")
             assert self.dj_decks[0]["scale"] == "battle"
             self.dj_set_scale(0, "major")
+            self.dj_set_key(0, 7)
+            assert self.dj_decks[0]["key"] == 7 and self.project.key == 7
+            self.dj_set_key(1, 3)                            # キーもデッキごとに独立
+            assert self.dj_decks[1]["key"] == 3 and self.dj_decks[0]["key"] == 7
+            self.dj_set_key(0, 0)
             self.dj_mood(0)                                  # おまかせ (ランダム)
             self.dj_set_noise(0, 3)
             noisy = sum(1 for _, n in _an_dj(self.project.phrase) if n.wave == _WN)
@@ -2265,6 +2548,122 @@ class PicoSeqApp:
             self._dj_pending = None
             self._dj_do_swap()
 
+            # 音色もデッキごと。画面の配色 (theme_sound) は変えない
+            palette_before = self.theme_sound
+            self.dj_set_sound(0, "warm16")
+            self.dj_set_sound(1, "clear32")
+            assert self.dj_decks[0]["sound"] == "warm16"
+            assert self.dj_decks[1]["sound"] == "clear32"
+            assert self.project.sound == "warm16"          # 鳴っている側が反映される
+            assert self.theme_sound == palette_before      # 演奏中に配色は動かさない
+
+            # SYNC: 相手デッキへテンポとキーを合わせる (曲調・音色はそのまま)
+            self.dj_set_tempo(1, 168)
+            self.dj_set_key(1, 5)
+            self.dj_sync(0)
+            assert self.dj_decks[0]["bpm"] == 168 and self.dj_decks[0]["key"] == 5
+            assert self.dj_decks[0]["sound"] == "warm16"   # 音色は合わせない
+            self.dj_sync(0)                                # 既に合っている → 何も壊れない
+
+            # 音色・長さ: 各パートで調整でき、音符は変えず音作りだけが変わる
+            from ..core.constants import WAVE_SAW as _WS
+            self.dj_set_part_tone(0, WAVE_PULSE, 100)     # メロディのパルス幅を最大 (矩形)
+            square = self.project.parts[WAVE_PULSE][0].tone
+            notes_before = [(n.pitch, n.step) for _, n in _an_dj(self.project.phrase)]
+            self.dj_set_part_tone(0, WAVE_PULSE, 0)       # 細いパルスへ
+            thin = self.project.parts[WAVE_PULSE][0].tone
+            notes_after = [(n.pitch, n.step) for _, n in _an_dj(self.project.phrase)]
+            assert square == 100 and thin == 0
+            assert notes_before == notes_after            # 音符 (メロディ) は不変
+            assert self.dj_decks[0]["tones"][WAVE_PULSE] == 0
+            # パートごとに独立: サブ (ノコギリ) の音色・長さは別に持つ
+            self.dj_set_part_tone(0, _WS, 80)
+            self.dj_set_part_gate(0, _WS, 30)
+            assert self.dj_decks[0]["tones"][_WS] == 80
+            assert self.dj_decks[0]["tones"][WAVE_PULSE] == 0     # メロディは影響なし
+            assert self.dj_decks[0]["gates"][_WS] == 30
+            assert self.project.parts[_WS][0].tone == 80 and self.project.parts[_WS][0].gate == 30
+            # 長さはメロディも: 短く歯切れよく
+            self.dj_set_part_gate(0, WAVE_PULSE, 20)
+            assert self.project.parts[WAVE_PULSE][0].gate == 20
+            self.dj_set_part_tone(0, WAVE_PULSE, 50)
+            self.dj_set_part_gate(0, WAVE_PULSE, 80)
+            self.dj_set_part_tone(0, _WS, 50)
+            self.dj_set_part_gate(0, _WS, 80)
+
+            # 履歴: 流したフレーズが新しい順に積まれ、同じものは繰り上がる
+            self.dj_history = []
+            self.dj_roll(0)
+            first = dict(self.dj_history[0])
+            self.dj_roll(0)
+            assert len(self.dj_history) == 2
+            assert self.dj_history[0]["seed"] != first["seed"]
+            # つまみ操作も履歴に残る (デバウンス後に新しい行として確定)
+            rows = len(self.dj_history)
+            self.dj_set_noise(0, 2)
+            self._dj_history_flush()                       # デバウンスを即確定
+            assert len(self.dj_history) == rows + 1        # 調整ぶんが 1 行増える
+            assert self.dj_history[0]["noise"] == 2
+            assert any(e["noise"] == 0 for e in self.dj_history)   # 調整前も残っている
+            self.dj_set_noise(0, 0)
+            self._dj_history_flush()
+            assert self.dj_history[0]["noise"] == 0
+            # 履歴のクリア (お気に入りは消えない)
+            self.dj_clear_history()
+            assert self.dj_history == []
+
+            # お気に入り: 登録・解除と、設定ファイルへの永続化
+            # 本物の設定ファイルを触るので、利用者の ★ は最後に必ず戻す
+            saved_favorites = list(self.dj_favorites)
+            try:
+                self.dj_favorites = []
+                entry = self._dj_entry()
+                assert self.dj_toggle_favorite(entry) is True
+                assert dj_core.is_favorite(self.dj_favorites, entry)
+                assert dj_core.sanitize_entries(
+                    storage.load_settings().get("dj_favorites", []))   # 保存されている
+                assert self.dj_toggle_favorite(entry) is False         # もう一度で解除
+                assert not dj_core.is_favorite(self.dj_favorites, entry)
+            finally:
+                self.dj_favorites = saved_favorites
+                restore = storage.load_settings()
+                restore["dj_favorites"] = saved_favorites
+                storage.save_settings(restore)
+
+            # 呼び戻し: エントリの設定 (パート音色・長さ含む) がデッキへ入り、固定される
+            recall = dj_core.make_entry("battle", 9, 96, "clear32", 1, 4242,
+                                        tones=(20, 30, 40, 50), gates=(15, 25, 35, 45),
+                                        deck=0)
+            self.dj_recall(recall, 1)
+            assert self.dj_decks[1]["scale"] == "battle"
+            assert self.dj_decks[1]["key"] == 9 and self.dj_decks[1]["bpm"] == 96
+            assert self.dj_decks[1]["seed"] == 4242 and self.dj_decks[1]["hold"]
+            assert self.dj_decks[1]["tones"] == [20, 30, 40, 50]   # 音色も復元される
+            assert self.dj_decks[1]["gates"] == [15, 25, 35, 45]   # 長さも復元される
+            self.dj_set_hold(1, False)
+
+            # 💾 残す: 空きスロットへパターンとして保存 (盤面は変えない)
+            board = self.project.phrase
+            used_before = sum(1 for p in self.project.patterns if p.used)
+            slot = self.dj_keep(recall)
+            assert slot >= 0 and self.project.patterns[slot].used
+            assert sum(1 for p in self.project.patterns if p.used) == used_before + 1
+            assert self.project.phrase == board            # 盤面はそのまま
+            assert count_notes(self.project.patterns[slot].notes) > 0
+            self.commit(actions.delete_pattern(self.project, slot))
+
+            # 録音: silent では使えないので、案内だけ出して録音状態にならない
+            self.dj_record_toggle()
+            assert not self._dj_recording
+            # 保存ヘルパは空 PCM でも落ちない
+            self._dj_save_recording(b"")
+
+            # 一覧の再構築が例外なく走る (空でも行があっても)
+            self.dj_view.sync_log([], [])
+            self.dj_view.sync_log(self.dj_history, [recall])
+            self.dj_set_sound(0, "retro8")
+            self.dj_set_sound(1, "retro8")
+
             # パート・スライダー・各コンボの配線
             self.switch_tab("phrase")
             self.select_part(2)
@@ -2319,10 +2718,16 @@ class PicoSeqApp:
             assert self.project.progression is not None
 
             # 編集ツール: 移調・反転・パート消去
-            self.generate_auto()
+            self.generate_auto()                       # 乱数シードで一巡 (配線確認)
             from ..core.phrase import active_notes as _an
+            # 移調テストは決定論的に。乱数生成だと稀に高音域だけのメロディになり、
+            # 1 オクターブ上げると全音符が音域外へ出て空になってしまうため、
+            # 中音域のフレーズが出る固定シードで確認する。
+            self.commit(actions.generate_phrase(
+                actions.set_seed(actions.set_scale(self.project, "major"), 42)))
             pitches_before = sorted(n.pitch for _, n in _an(self.project.phrase)
                                     if n.wave == 0)
+            assert pitches_before                      # メロディが存在する
             self.transpose_up()
             pitches_after = sorted(n.pitch for _, n in _an(self.project.phrase)
                                    if n.wave == 0)
@@ -2340,6 +2745,21 @@ class PicoSeqApp:
             self.generate_surprise()
             assert count_notes(self.project.phrase) > 0
             assert self.theme_sound == self.project.sound  # 配色と音色が一致
+            # テンポ・各パートの音色・長さもランダムに振れ、常に有効範囲に収まる
+            voicings, tempos = set(), set()
+            for _ in range(12):
+                self.generate_surprise()
+                assert SURPRISE_BPM[0] <= self.project.bpm <= SURPRISE_BPM[1]
+                assert self.bpm_var.get() == str(self.project.bpm)  # 表示も追従
+                tempos.add(self.project.bpm)
+                for w in range(PART_COUNT):
+                    for lyr in self.project.parts[w]:
+                        assert 0 <= lyr.tone <= 100 and 25 <= lyr.gate <= 100
+                voicings.add(tuple((lyr.tone, lyr.gate)
+                                   for w in range(PART_COUNT)
+                                   for lyr in self.project.parts[w]))
+            assert len(voicings) > 1                        # 質感がランダムに変わる
+            assert len(tempos) > 1                          # テンポもランダムに変わる
             self.select_part(0)
 
             # MIDI 書き出しがフレーズ・ソングとも有効なバイト列を作る
@@ -2684,7 +3104,17 @@ def _load_demo(app):
         app.switch_tab(os.environ["PICOSEQ_DEMO_TAB"])
         if os.environ["PICOSEQ_DEMO_TAB"] == "dj":
             app.dj_set_noise(0, 2)
+            app.dj_set_part_tone(0, 3, 80)           # サブの音色を変えて見た目確認
+            app.dj_set_part_gate(0, 3, 40)
+            app.dj_view._focus_part(0, 3)            # サブを選択した状態で開く
             app.dj_view.update_spin("a", True, 0.8)  # 見た目確認用に回転位置をずらす
+            for i, (scale, key, bpm) in enumerate(   # 履歴・お気に入りの見た目確認用
+                    (("major", 0, 120), ("battle", 7, 150), ("minor", 3, 96),
+                     ("dorian", 5, 128), ("majpent", 9, 110), ("blues", 2, 88))):
+                app.dj_history.append(dj_core.make_entry(scale, key, bpm, "retro8",
+                                                         0, 100 + i, deck=i % 2))
+            app.dj_favorites = app.dj_history[1:3]
+            app._refresh_dj_log()
     photo_path = os.environ.get("PICOSEQ_DEMO_PHOTO")
     if photo_path:
         def open_photo():

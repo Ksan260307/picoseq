@@ -1,5 +1,6 @@
 """音楽理論 — キー・スケール・コード・音名・周波数テーブル。"""
 
+from functools import lru_cache
 from typing import NamedTuple
 
 from .constants import PITCH_MIN, PITCH_MAX
@@ -94,7 +95,7 @@ PHOTO_SCALE = "photo"  # 写真から抽出したカスタム音階 (プロジ�
 # ひな型に、その機能に属する度数を当てはめて大量に作る。
 # 度数は音階の「位置」で機能を割り当てるので、どの音階でも音楽的な流れになる。
 
-PROGRESSION_LIMIT = 480  # 1 音階あたりの進行数の上限
+PROGRESSION_LIMIT = 3000  # 1 音階あたりの進行数の上限 (実質すべての生成結果を通す)
 
 
 def _function_templates() -> tuple:
@@ -103,7 +104,7 @@ def _function_templates() -> tuple:
     ・トニックかサブドミナントで始める (調を示す/導く)
     ・トニックかドミナントで終える (終止感)
     ・少なくとも 2 種類の機能を使う (停滞させない)
-    ・同じ機能を 3 連続させない
+    ・同じ機能を 4 連続させない (3 連続はトニック延長などで許容)
     """
     templates = []
     for a in range(3):
@@ -115,7 +116,7 @@ def _function_templates() -> tuple:
                         continue
                     if len(set(combo)) < 2:
                         continue
-                    if a == b == c or b == c == d:
+                    if a == b == c == d:
                         continue
                     templates.append(combo)
     return tuple(templates)
@@ -125,15 +126,21 @@ _FUNCTION_TEMPLATES = _function_templates()
 
 
 def _function_groups(n: int):
-    """音数 n の音階を、位置でトニック/サブドミナント/ドミナントに分ける。"""
-    if n >= 7:
-        return ((0, 2, 5), (1, 3), (4, 6))
+    """音数 n の音階を、位置でトニック/サブドミナント/ドミナントに分ける。
+
+    代理和音 (同じ機能を担える度数) を各機能へ広めに含めることで、機能和声の
+    枠を保ったまま組み合わせを大きく増やす。例: 7 音では iii/vi が複数の機能を兼ねる。
+    """
+    if n >= 8:
+        return ((0, 2, 5, 3, 4), (1, 3, 5, 6, 7), (2, 4, 6, 7, 1))
+    if n == 7:
+        return ((0, 2, 5, 3, 4), (1, 3, 5, 6, 0), (2, 4, 6, 1, 3))
     if n == 6:
-        return ((0, 2, 4), (1, 3), (5,))
+        return ((0, 2, 4, 1), (1, 3, 5, 0), (5, 3, 1, 4))
     if n == 5:
-        return ((0, 2), (3,), (1, 4))
+        return ((0, 2, 4), (3, 1, 0), (1, 4, 2))
     if n == 4:
-        return ((0, 2), (3,), (1,))
+        return ((0, 2), (3, 1), (1, 3))
     return ((0,), (min(2, n - 1),), (min(1, n - 1),))  # 3 音以下
 
 
@@ -145,8 +152,13 @@ def _product(groups):
     return result
 
 
-def _generate_progressions(n: int) -> list:
-    """音数 n の音階向けに、機能和声のひな型からコード進行を生成する。"""
+@lru_cache(maxsize=None)
+def _generate_progressions(n: int) -> tuple:
+    """音数 n の音階向けに、機能和声のひな型からコード進行を生成する。
+
+    結果は n だけで決まるので、同じ音数の音階 (7 音は 37 種類ある) で使い回せるよう
+    キャッシュする。返り値は不変にしたいので tuple。
+    """
     groups = _function_groups(n)
     out = []
     seen = set()
@@ -155,14 +167,14 @@ def _generate_progressions(n: int) -> list:
             if combo not in seen and all(0 <= d < n for d in combo):
                 seen.add(combo)
                 out.append(combo)
-    return out
+    return tuple(out)
 
 
 def _build_library(default, n: int) -> tuple:
     """既定進行を先頭に、生成した進行を続けて上限まで並べる。"""
     ordered = []
     seen = set()
-    for prog in [tuple(default)] + _generate_progressions(n):
+    for prog in (tuple(default),) + _generate_progressions(n):
         if prog not in seen and len(prog) == 4 and all(0 <= d < n for d in prog):
             seen.add(prog)
             ordered.append(prog)

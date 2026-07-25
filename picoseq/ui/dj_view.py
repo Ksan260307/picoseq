@@ -1,16 +1,18 @@
 """DJ モードの画面 — 2 枚のターンテーブルと、デッキごとのチャンネルストリップ。
 
 見た目 (回転・脈動・スクラッチ) だけを担当し、状態変更はすべて app のメソッドへ渡す。
-曲調・テンポ・ノイズ・フィルター・ループ固定・KILL は**デッキごとに独立**していて、
-中央にあるのは共通の操作 (再生・クロスフェーダー・タップ) だけ。
+曲調・キー・音色・テンポ・ノイズ・パート音作り(音色/長さ)・フィルター・固定・KILL は**デッキごと独立**。
+中央にあるのは共通の操作 (再生・クロスフェーダー・タップ・★/💾・録音) だけ。
+下段は流したフレーズの履歴とお気に入りで、どちらからでもデッキへ呼び戻せる。
 """
 
 import math
 import tkinter as tk
 from tkinter import ttk
 
+from ..core import dj as dj_core
 from ..core.constants import BPM_MAX, BPM_MIN
-from ..core.music import SCALE_IDS, SCALES
+from ..core.music import KEY_NAMES, SCALE_IDS, SCALES
 from . import i18n, theme
 from .i18n import t
 
@@ -23,6 +25,8 @@ DECK_KEYS = ("a", "b")
 STRIP_LABEL = 54       # ストリップのラベル列幅
 SLIDER_LEN = 88
 MOOD_WIDTH = 12        # 曲調セレクタの文字幅
+LOG_ROWS = 5           # 一覧の高さ (行数)。これを超えるぶんはスクロールで見る
+LOG_ROW_H = 24         # 1 行のおおよその高さ (px)
 
 
 def angle_diff(a, b):
@@ -41,6 +45,7 @@ class DJView:
         self.deck_angle = {"a": 0.0, "b": 0.0}
         self.platters = {}
         self.decks = {}              # key -> ウィジェット一式
+        self._part_focus = {"a": 0, "b": 0}   # 音色・長さスライダーが編集するパート
         self._active_key = "a"
         self._grab = None
         self._syncing = False        # 同期中はコールバックを無視する
@@ -54,6 +59,7 @@ class DJView:
         self._build_deck("a", strip_side="right")
         self._build_mixer()
         self._build_deck("b", strip_side="left")
+        self._build_log()
 
     # ---- デッキ (ターンテーブル + チャンネルストリップ) ----
 
@@ -86,7 +92,7 @@ class DJView:
         canvas.bind("<B1-Motion>", lambda e, k=key: self._on_platter_motion(k, e))
         canvas.bind("<ButtonRelease-1>", lambda e, k=key: self._on_platter_release(k, e))
         self.platters[key] = {"canvas": canvas, "color": color,
-                              **self._draw_platter(canvas, color)}
+                              **self._draw_platter(canvas, color, key.upper())}
 
         name_var = tk.StringVar()
         seed_var = tk.StringVar()
@@ -126,7 +132,7 @@ class DJView:
                                                                      padx=(4, 0))
             return scale, var
 
-        # 曲調 (任意に選べるセレクタ)
+        # 曲調 (65 種類から任意に選ぶ)
         label("dj_mood_label", row)
         combo = ttk.Combobox(strip, values=scale_choices(), state="readonly",
                              width=MOOD_WIDTH, font=theme.FONT_SMALL)
@@ -136,6 +142,27 @@ class DJView:
         widgets["mood"] = combo
         row += 1
 
+        # キー (0=C .. 11=B)
+        label("dj_key_label", row)
+        key_combo = ttk.Combobox(strip, values=list(KEY_NAMES), state="readonly",
+                                 width=MOOD_WIDTH, font=theme.FONT_SMALL)
+        key_combo.grid(row=row, column=1, sticky="w", pady=2)
+        key_combo.bind("<<ComboboxSelected>>",
+                       lambda e, d=deck, c=key_combo: self._on_key(d, c))
+        widgets["key"] = key_combo
+        row += 1
+
+        # 音色 (デッキごと。フレーズ画面と違い配色は変えない)
+        label("lbl_sound", row)
+        sound_combo = ttk.Combobox(
+            strip, values=[i18n.sound_label(s) for s in theme.SOUND_IDS],
+            state="readonly", width=MOOD_WIDTH, font=theme.FONT_SMALL)
+        sound_combo.grid(row=row, column=1, sticky="w", pady=2)
+        sound_combo.bind("<<ComboboxSelected>>",
+                         lambda e, d=deck, c=sound_combo: self._on_sound(d, c))
+        widgets["sound"] = sound_combo
+        row += 1
+
         widgets["tempo"], widgets["tempo_var"] = slider_row(
             row, "dj_tempo", BPM_MIN, BPM_MAX,
             lambda v, d=deck: self._on_tempo(d, v), theme.ACCENT)
@@ -143,6 +170,26 @@ class DJView:
         widgets["noise"], widgets["noise_var"] = slider_row(
             row, "dj_noise", 0, 4,
             lambda v, d=deck: self._on_noise(d, v), theme.DANGER, width=2)
+        row += 1
+        # パートごとの音作り: パート選択 (M/B/R/S) → 音色・長さ のスライダーで編集
+        label("dj_part_label", row)
+        picker = tk.Frame(strip, bg=theme.PANEL)
+        picker.grid(row=row, column=1, sticky="w", pady=2)
+        widgets["part_btns"] = []
+        for i, glyph in enumerate(("M", "B", "R", "S")):
+            btn = tk.Button(picker, text=glyph, font=theme.FONT_SMALL, width=2,
+                            relief="flat", bd=1, takefocus=0, cursor="hand2",
+                            command=lambda i=i, d=deck: self._focus_part(d, i))
+            btn.pack(side="left", padx=1)
+            widgets["part_btns"].append(btn)
+        row += 1
+        widgets["part_tone"], widgets["part_tone_var"] = slider_row(
+            row, "lbl_tone", 0, 100,
+            lambda v, d=deck: self._on_part_tone(d, v), theme.ACCENT)
+        row += 1
+        widgets["part_gate"], widgets["part_gate_var"] = slider_row(
+            row, "lbl_gate", 10, 100,
+            lambda v, d=deck: self._on_part_gate(d, v), theme.ACCENT)
         row += 1
         widgets["filter"], widgets["filter_var"] = slider_row(
             row, "dj_filter", 0, 100,
@@ -174,10 +221,15 @@ class DJView:
             widgets["kill"].append(btn)
         row += 1
 
-        self.app._button(strip, t("dj_roll"), lambda d=deck: self.app.dj_roll(d),
-                         accent=True).grid(row=row, column=0, columnspan=2, pady=(6, 0))
+        # 生成 (新しいフレーズ) と SYNC (もう一方へテンポ・キーを合わせる)
+        foot = tk.Frame(strip, bg=theme.PANEL)
+        foot.grid(row=row, column=0, columnspan=2, pady=(6, 0))
+        self.app._button(foot, t("dj_roll"), lambda d=deck: self.app.dj_roll(d),
+                         accent=True).pack(side="left", padx=2)
+        self.app._button(foot, t("dj_sync"),
+                         lambda d=deck: self.app.dj_sync(d)).pack(side="left", padx=2)
 
-    def _draw_platter(self, canvas, color):
+    def _draw_platter(self, canvas, color, letter):
         c = PLATTER // 2
         canvas.create_oval(c - R_OUTER, c - R_OUTER, c + R_OUTER, c + R_OUTER,
                            fill="#0a0a0a", outline=theme.PANEL_EDGE, width=2)
@@ -187,8 +239,10 @@ class DJView:
                                   outline=color, width=2)
         canvas.create_oval(c - R_LABEL, c - R_LABEL, c + R_LABEL, c + R_LABEL,
                            fill=color, outline="#0a0a0a", width=2)
-        label_text = canvas.create_text(c, c, text="", font=theme.FONT_BOLD,
-                                        fill=theme.KEY_TEXT)
+        # センターラベルはデッキ記号のみ。曲調名を入れると円に収まらず欠けるので、
+        # 名前はディスク下のラベルに任せる。
+        label_text = canvas.create_text(c, c, text=letter, fill=theme.KEY_TEXT,
+                                        font=(theme.FONT_BOLD[0], 20, "bold"))
         marks = [canvas.create_line(c, c, c, c, fill="#e8e8e8", width=3)
                  for _ in range(2)]
         dots = [canvas.create_oval(0, 0, 0, 0, fill=theme.PLAYHEAD, outline="")
@@ -224,6 +278,120 @@ class DJView:
                  fg=_deck_color("b")).pack(side="left")
 
         self.app._button(mix, t("dj_tap"), self.app.dj_tap).pack()
+        # 今流している音をその場で ★ / パターンへ (履歴から探さずに残せる)
+        keep_row = tk.Frame(mix, bg=theme.PANEL)
+        keep_row.pack(pady=(8, 0))
+        self.app._button(keep_row, t("dj_fav_now"),
+                         self.app.dj_toggle_favorite).pack(side="left", padx=2)
+        self.app._button(keep_row, t("dj_keep_now"),
+                         self.app.dj_keep).pack(side="left", padx=2)
+        # セット録音 (鳴っているミックスをそのまま WAV に)
+        self.rec_btn = self.app._button(mix, t("dj_record"), self.app.dj_record_toggle)
+        self.rec_btn.pack(pady=(8, 0))
+
+    # ---- 履歴 / お気に入り ----
+
+    def _build_log(self):
+        """流したフレーズの履歴と、★ お気に入りを左右に並べる。
+
+        どちらの行も「呼び戻す (デッキ A / B へ)」「★」「パターンへ保存」ができる。
+        表示しているのはフレーズを決める種 (曲調・キー・テンポ・音色) だけなので、
+        押せばいつでも同じフレーズが決定論的に再生成される。
+        """
+        wrap = tk.Frame(self.frame, bg=theme.BG)
+        wrap.pack(side="top", fill="both", expand=True, anchor="w", padx=6, pady=(8, 0))
+        self.log_lists = {}
+        self._log_canvas = {}
+        clear = {"history": self.app.dj_clear_history,
+                 "favorites": self.app.dj_clear_favorites}
+        for kind, title in (("history", "dj_history"), ("favorites", "dj_favorites")):
+            box = tk.Frame(wrap, bg=theme.PANEL, padx=8, pady=6,
+                           highlightbackground=theme.PANEL_EDGE, highlightthickness=1)
+            box.pack(side="left", fill="both", expand=True, padx=(0, 8))
+            head = tk.Frame(box, bg=theme.PANEL)
+            head.pack(fill="x", pady=(0, 4))
+            tk.Label(head, text=t(title), font=theme.FONT_BOLD, bg=theme.PANEL,
+                     fg=theme.TEXT_DIM, anchor="w").pack(side="left")
+            btn = tk.Button(head, text=t("dj_clear"), font=theme.FONT_SMALL,
+                            relief="flat", bd=1, takefocus=0, cursor="hand2",
+                            bg=theme.BTN_BG, fg=theme.TEXT, command=clear[kind])
+            btn.pack(side="right")
+            self.log_lists[kind] = self._scroll_list(box, kind)
+
+    def _scroll_list(self, parent, kind):
+        """縦スクロールする行の入れ物を作って返す。
+
+        ディスクを大きく取っているぶん DJ タブは背が高い。ウィンドウが低くても
+        古い履歴に手が届くよう、一覧側をスクロールさせて逃がす。
+        """
+        holder = tk.Frame(parent, bg=theme.PANEL)
+        holder.pack(fill="both", expand=True)
+        canvas = tk.Canvas(holder, bg=theme.PANEL, highlightthickness=0,
+                           height=LOG_ROWS * LOG_ROW_H)
+        bar = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+
+        rows = tk.Frame(canvas, bg=theme.PANEL)
+        window = canvas.create_window(0, 0, window=rows, anchor="nw")
+        rows.bind("<Configure>",
+                  lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        # 行を横幅いっぱいに広げる (キャンバス内の窓は既定で中身の幅のまま)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+        self._log_canvas[kind] = canvas
+        self._bind_wheel(canvas, canvas)
+        return rows
+
+    def _bind_wheel(self, widget, canvas):
+        """widget とその子すべてでホイール回転を canvas のスクロールに繋ぐ。
+
+        行 (ラベルやボタン) の上でホイールを回してもスクロールできるよう、
+        毎回一覧を組み直したあとに子まで束ねる。
+        """
+        widget.bind("<MouseWheel>",
+                    lambda e, c=canvas: c.yview_scroll(-e.delta // 120, "units"))
+        for child in widget.winfo_children():
+            self._bind_wheel(child, canvas)
+
+    def sync_log(self, history, favorites):
+        """履歴・お気に入りの一覧を作り直す (行数が少ないので毎回組み直す)。"""
+        for kind, entries in (("history", history), ("favorites", favorites)):
+            rows = self.log_lists[kind]
+            for child in rows.winfo_children():
+                child.destroy()
+            if not entries:
+                tk.Label(rows, text=t("dj_log_empty"), font=theme.FONT_SMALL,
+                         bg=theme.PANEL, fg=theme.TEXT_DIM,
+                         anchor="w").pack(fill="x", pady=1)
+            else:
+                for entry in entries:        # 全件出す (入り切らない分はスクロール)
+                    self._log_row(rows, entry, favorites)
+            self._bind_wheel(rows, self._log_canvas[kind])   # 行の上でも回せるように
+
+    def _log_row(self, parent, entry, favorites):
+        row = tk.Frame(parent, bg=theme.PANEL)
+        row.pack(fill="x", pady=1)
+        deck_key = DECK_KEYS[max(0, min(1, entry.get("deck", 0)))]
+        tk.Label(row, text=deck_key.upper(), font=theme.FONT_BOLD, width=2,
+                 bg=theme.PANEL, fg=_deck_color(deck_key)).pack(side="left")
+
+        starred = dj_core.is_favorite(favorites, entry)
+        # 呼び戻しは「→A」「→B」。先頭のデッキ記号と見分けがつくようにする。
+        for text, command, tip in (
+                ("★" if starred else "☆", lambda e=entry: self.app.dj_toggle_favorite(e),
+                 "dj_tip_fav"),
+                ("→A", lambda e=entry: self.app.dj_recall(e, 0), "dj_tip_recall_a"),
+                ("→B", lambda e=entry: self.app.dj_recall(e, 1), "dj_tip_recall_b"),
+                ("💾", lambda e=entry: self.app.dj_keep(e), "dj_tip_keep")):
+            btn = tk.Button(row, text=text, font=theme.FONT_SMALL, width=3, relief="flat",
+                            bd=1, takefocus=0, cursor="hand2", command=command,
+                            bg=theme.BTN_BG,
+                            fg=theme.ACCENT if text == "★" else theme.TEXT)
+            btn.bind("<Enter>", lambda e, k=tip: self.app.set_status(t(k)))  # 役割を状況に表示
+            btn.pack(side="left", padx=1)
+        tk.Label(row, text=self.app.dj_entry_label(entry), font=theme.FONT_SMALL,
+                 bg=theme.PANEL, fg=theme.TEXT, anchor="w").pack(side="left", padx=(6, 0))
 
     # ---- スクラッチ ----
 
@@ -273,6 +441,20 @@ class DJView:
         if 0 <= index < len(SCALE_IDS):
             self.app.dj_set_scale(deck, SCALE_IDS[index])
 
+    def _on_key(self, deck, combo):
+        if self._syncing:
+            return
+        index = combo.current()
+        if 0 <= index < len(KEY_NAMES):
+            self.app.dj_set_key(deck, index)
+
+    def _on_sound(self, deck, combo):
+        if self._syncing:
+            return
+        index = combo.current()
+        if 0 <= index < len(theme.SOUND_IDS):
+            self.app.dj_set_sound(deck, theme.SOUND_IDS[index])
+
     def _on_tempo(self, deck, value):
         key = DECK_KEYS[deck]
         self.decks[key]["tempo_var"].set(str(int(float(value))))
@@ -284,6 +466,24 @@ class DJView:
         self.decks[key]["noise_var"].set(str(int(float(value))))
         if not self._syncing:
             self.app.dj_set_noise(deck, int(float(value)))
+
+    def _focus_part(self, deck, wave):
+        """音色・長さスライダーが編集するパートを切り替える (音は変えない)。"""
+        key = DECK_KEYS[deck]
+        self._part_focus[key] = wave
+        self.app._update_dj_decks()      # スライダーを選んだパートの値へ合わせる
+
+    def _on_part_tone(self, deck, value):
+        key = DECK_KEYS[deck]
+        self.decks[key]["part_tone_var"].set(str(int(float(value))))
+        if not self._syncing:
+            self.app.dj_set_part_tone(deck, self._part_focus[key], int(float(value)))
+
+    def _on_part_gate(self, deck, value):
+        key = DECK_KEYS[deck]
+        self.decks[key]["part_gate_var"].set(str(int(float(value))))
+        if not self._syncing:
+            self.app.dj_set_part_gate(deck, self._part_focus[key], int(float(value)))
 
     def _on_filter(self, deck, value):
         key = DECK_KEYS[deck]
@@ -303,12 +503,28 @@ class DJView:
             scale_id = deck_state["scale"]
             if scale_id in SCALE_IDS:
                 widgets["mood"].current(SCALE_IDS.index(scale_id))
+            widgets["key"].current(max(0, min(len(KEY_NAMES) - 1, deck_state["key"])))
+            if deck_state["sound"] in theme.SOUND_IDS:
+                widgets["sound"].current(theme.SOUND_IDS.index(deck_state["sound"]))
             widgets["tempo"].set(deck_state["bpm"])
             widgets["noise"].set(deck_state["noise"])
             widgets["filter"].set(deck_state["filter"])
             widgets["tempo_var"].set(str(deck_state["bpm"]))
             widgets["noise_var"].set(str(deck_state["noise"]))
             widgets["filter_var"].set(str(deck_state["filter"]))
+            # パートごとの音色・長さ: 選択中のパートの値をスライダーへ
+            focus = self._part_focus[key]
+            tone = deck_state["tones"][focus]
+            gate = deck_state["gates"][focus]
+            widgets["part_tone"].set(tone)
+            widgets["part_gate"].set(gate)
+            widgets["part_tone_var"].set(str(tone))
+            widgets["part_gate_var"].set(str(gate))
+            for i, btn in enumerate(widgets["part_btns"]):
+                on = (i == focus)
+                btn.configure(bg=theme.ACCENT if on else theme.BTN_BG,
+                              fg=theme.KEY_TEXT if on else theme.PART_COLORS[i],
+                              relief="sunken" if on else "flat")
             widgets["hold_var"].set(bool(deck_state["hold"]))
             for i, btn in enumerate(widgets["kill"]):
                 if i in deck_state["muted"]:
@@ -317,7 +533,6 @@ class DJView:
                     btn.configure(bg=theme.BTN_BG, fg=theme.PART_COLORS[i],
                                   relief="flat")
             plat = self.platters[key]
-            plat["canvas"].itemconfigure(plat["label_text"], text=name[:6])
             plat["canvas"].itemconfigure(
                 plat["glow"], width=4 if active else 2,
                 outline=plat["color"] if active else theme.PANEL_EDGE)
@@ -344,6 +559,16 @@ class DJView:
 
     def set_play(self, playing):
         self.play_btn.configure(text=t("dj_stop") if playing else t("dj_play"))
+
+    def set_recording(self, recording):
+        """録音ボタンの見た目を切り替える (録音中は赤く「■ 停止」)。"""
+        if not hasattr(self, "rec_btn"):
+            return
+        if recording:
+            self.rec_btn.configure(text=t("dj_record_stop"), bg=theme.DANGER,
+                                   fg=theme.KEY_TEXT)
+        else:
+            self.rec_btn.configure(text=t("dj_record"), bg=theme.BTN_BG, fg=theme.TEXT)
 
     def update_spin(self, active_key, spinning, beat_level):
         if spinning:

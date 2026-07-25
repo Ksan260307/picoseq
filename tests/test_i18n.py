@@ -34,6 +34,11 @@ class TestLangSwitch(unittest.TestCase):
         i18n.set_lang("ja")
         self.assertEqual(i18n.t("btn_remove_layer", n=3), "✕ 3 を削除")
 
+    def test_placeholder_named_key_does_not_collide(self):
+        # t() の第 1 引数は _name。{key} を差し込み名に使っても衝突しない。
+        i18n.set_lang("ja")
+        self.assertIn("C / Am", i18n.t("st_dj_key", deck="A", key="C / Am"))
+
     def test_unknown_key_returns_key(self):
         self.assertEqual(i18n.t("no_such_key_xyz"), "no_such_key_xyz")
 

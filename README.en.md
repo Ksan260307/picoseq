@@ -24,11 +24,12 @@ Place notes on a grid to build a song — or start from a photo or your own humm
   Japanese scales (in-sen, ryukyu, …) / blues, jazz, whole-tone, diminished / world scales
   (Persian, Arabic, Hungarian, …) and more (plus photo-derived scales)
 - **✨ Auto-compose** — one-click composition. Keep the "seed value" to recreate the exact same tune anytime.
-  Chord progressions (100–480 per mood, **~27,000 total**) × 6 bass × 5 backing × 6 drum × 4 melody-rhythm ×
-  3 development styles combine, so every seed sounds different. Progressions are generated from
-  functional harmony (tonic / subdominant / dominant); the one used (e.g. Am→F→C→G) is shown after generating
-- **🎲 Surprise me** — randomizes mood, sound set, and seed for a one-click reveal, so you stumble
-  onto unexpected combinations from all 65 moods
+  Chord progressions (500–4,000 per mood, **~120,000 total**) × 9 bass × 7 backing × 9 drum × 6 melody-rhythm ×
+  4 development styles (**13,000+ playing-style combos alone**) combine, so every seed sounds different.
+  Progressions are generated from functional harmony (tonic / subdominant / dominant) with substitute chords;
+  the one used (e.g. Am→F→C→G) is shown after generating
+- **🎲 Surprise me** — randomizes mood, sound set, **tempo** and seed, **plus each part's tone (pulse width,
+  etc.) and length**, for a one-click reveal — so even the texture is an unexpected combination from all 65 moods
 - **🎼 Auto-song** — generates a whole Intro → A → B → Outro song structure in one click
   (each pattern gets a default name: Intro / A / B / Outro)
 - **🎧 DJ mode** — two big turntables for real-time jamming. Press ▶ and it **auto-generates a new
@@ -162,14 +163,37 @@ The imported scale stays available in the mood selector as *📷 Photo Scale*.
 - **Drag a disc (with the mouse) to scratch** — it layers over the music.
   Click a disc without moving (a tap) to generate a fresh phrase on that deck
 - The **crossfader** switches between decks A ⇄ B (cue up the other deck, then bring it in)
-- **Mood / Tempo / Noise / Filter / Hold / KILL are per-deck** channel strips, so you can set up
+- **Mood / Key / Tempo / Noise / Filter / Hold / KILL are per-deck** channel strips, so you can set up
   one deck while the other is playing:
-  - **Mood**: pick any of the 65 scales from the selector (🎲 Roll is the random shortcut)
+  - **Mood**: pick any of the 65 scales from the selector (🎲 Roll is the random shortcut).
+    Both decks start on "Bright (major)"
+  - **Key**: pick any of the 12 keys. Set the decks apart to modulate, or match them for a
+    seamless blend (changing mood or key keeps the phrase's shape — only 🎲 Roll rewrites it)
+  - **Sound**: the same 3 sound sets as the Phrase screen, per deck. In DJ mode the
+    **palette stays put**, so the discs never jump and A and B can hold different sounds
   - **Noise** (0–4): hi-hat-style ticks and build-up rolls
+  - **Tone / Length (per part)**: pick Melody / Bass / Rhythm / Sub under "Part", then dial in
+    that part's **Tone** (for the melody, the pulse-wave duty cycle 12.5%–50%: **thin blip ⇄
+    fat square**) and **Length** (gate — shorter is punchier, longer sustains). The notes
+    stay the same; only the sound design changes
   - **Filter**: sweep a low-pass (dark ⇄ open)
   - **Hold loop**: stop advancing and loop that deck's phrase
   - **KILL**: instantly mute a part (melody / bass / rhythm / sub)
+  - **SYNC**: match **tempo and key** to the other deck. Mood and sound are left alone,
+    so you can layer two different moods that share a beat and a key
 - Control changes apply **immediately** (no waiting for the loop boundary); **Tap** sets the tempo
+- **🕘 History**: every phrase you played, newest first. From a row you can
+  **recall it onto either deck (→A / →B)**, **star it**, or **save it as a pattern (💾)**.
+  **Control tweaks are logged too** (committed as one row once you settle), so you can always
+  jump back to "how it sounded before I dialed it in". Use **Clear** when it fills up
+- **⏺ Record**: the record button in the centre captures the live mix (switches, scratches,
+  noise and all) **straight to a WAV**. Press again to stop and choose where to save —
+  it comes out exactly as you heard it
+- **★ Favorites**: star the ones you like — they are **kept in the settings file, so they
+  survive a restart**. The centre **★ Save / 💾 Keep** buttons do the same for whatever is
+  playing right now
+- What is stored is not audio but the **seed of the phrase** (mood, key, tempo, sound,
+  noise, seed). It regenerates deterministically, so the log stays tiny however long you play
 
 **Playback & sound sets**
 

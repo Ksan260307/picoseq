@@ -24,7 +24,7 @@ from picoseq.core.synth import (
 
 GOLDEN_VOICE_CRC = {
     WAVE_PULSE: 132701679,
-    WAVE_TRIANGLE: 2680058093,
+    WAVE_TRIANGLE: 71178892,   # 擬似ベース強調 (倍音を重ねて可聴化) 後の波形
     WAVE_NOISE: 3794188056,
     WAVE_SAW: 3051989150,
 }
@@ -114,6 +114,28 @@ class TestRenderVoice(unittest.TestCase):
             with self.subTest(wave=wave):
                 voice = render_voice(wave, 60, 5512, 50, 80)
                 self.assertEqual(zlib.crc32(clip_to_pcm(voice)), crc)
+
+    def test_bass_has_audible_harmonics(self):
+        """低いベース音でも可聴域 (>180Hz) に倍音の芯がある (擬似ベース強調)。
+
+        基音のみだと >180Hz の比率は約 0.19 に留まる。倍音を重ねることで
+        小型スピーカーやノート PC でもベースが聞こえるようになっている。
+        """
+        import math
+
+        from picoseq.core.constants import SAMPLE_RATE
+        voice = render_voice(WAVE_TRIANGLE, 36, 5512, 50, 80)  # 低い C2
+        rc = 1 / (2 * math.pi * 180)                            # 180Hz ハイパス
+        alpha = rc / (rc + 1 / SAMPLE_RATE)
+        y = xp = 0.0
+        hp_sq = 0.0
+        for x in voice:
+            y = alpha * (y + x - xp)
+            xp = x
+            hp_sq += y * y
+        hp_rms = (hp_sq / len(voice)) ** 0.5
+        full_rms = (sum(x * x for x in voice) / len(voice)) ** 0.5
+        self.assertGreater(hp_rms, full_rms * 0.25)            # 芯が可聴域にある
 
     def test_length_matches_gate(self):
         voice = render_voice(WAVE_SAW, 60, 5512, 50, 80)

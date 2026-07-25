@@ -20,12 +20,16 @@ def set_lang(lang: str):
         _lang = lang
 
 
-def t(key: str, **fmt) -> str:
-    """訳語を引く。fmt があれば str.format で埋め込む。"""
-    entry = STRINGS.get(key)
+def t(_name: str, **fmt) -> str:
+    """訳語を引く。fmt があれば str.format で埋め込む。
+
+    第 1 引数を `_name` にしているのは、{key} など普通の語を差し込み名に
+    使えるようにするため (`key=` と衝突させない)。呼び出しは常に位置引数。
+    """
+    entry = STRINGS.get(_name)
     if entry is None:
-        return key.format(**fmt) if fmt else key
-    text = entry.get(_lang) or entry.get("ja") or key
+        return _name.format(**fmt) if fmt else _name
+    text = entry.get(_lang) or entry.get("ja") or _name
     return text.format(**fmt) if fmt else text
 
 
@@ -237,8 +241,8 @@ STRINGS = {
                      "en": "Made with seed {seed} (progression {prog}). Like it? ★ Save pat.!"},
     "st_seed_reproduced": {"ja": "シード値 {seed} の曲を再現 (コード進行 {prog})。",
                            "en": "Reproduced seed {seed} (progression {prog})."},
-    "st_surprise": {"ja": "🎲 「{scale}」×「{sound}」×シード値 {seed} (コード進行 {prog})！",
-                    "en": "🎲 \"{scale}\" × \"{sound}\" × seed {seed} (progression {prog})!"},
+    "st_surprise": {"ja": "🎲 「{scale}」×「{sound}」×{bpm} BPM×シード値 {seed} (コード進行 {prog})！",
+                    "en": "🎲 \"{scale}\" × \"{sound}\" × {bpm} BPM × seed {seed} (progression {prog})!"},
     "st_no_melody": {
         "ja": "メロディがありません。メロディ (パート1) を置いてから「🎸 伴奏づけ」を押してください。",
         "en": "No melody. Place a melody (part 1), then press \"🎸 Add backing\"."},
@@ -426,6 +430,9 @@ STRINGS = {
     "dj_roll": {"ja": "🎲 生成", "en": "🎲 Roll"},
     "dj_mood": {"ja": "🎼 曲調", "en": "🎼 Mood"},
     "dj_mood_label": {"ja": "曲調", "en": "Mood"},
+    "dj_key_label": {"ja": "キー", "en": "Key"},
+    "st_dj_key": {"ja": "デッキ {deck} のキーを {key} にしました。",
+                  "en": "Deck {deck} key → {key}."},
     "dj_play": {"ja": "▶ 回す", "en": "▶ Spin"},
     "dj_stop": {"ja": "■ 停止", "en": "■ Stop"},
     "dj_crossfade": {"ja": "クロスフェーダー", "en": "Crossfader"},
@@ -434,7 +441,7 @@ STRINGS = {
     "dj_noise": {"ja": "ノイズ", "en": "Noise"},
     "dj_filter": {"ja": "フィルター", "en": "Filter"},
     "dj_hold": {"ja": "ループ固定", "en": "Hold loop"},
-    "dj_kill": {"ja": "KILL (消音)", "en": "KILL (mute)"},
+    "dj_kill": {"ja": "KILL", "en": "KILL"},
     "st_dj_rolled": {"ja": "デッキ {deck} を シード {seed} で生成。", "en": "Rolled deck {deck} with seed {seed}."},
     "st_dj_mood": {"ja": "デッキ {deck} の曲調を「{mood}」に。", "en": "Deck {deck} mood → \"{mood}\"."},
     "st_dj_switch": {"ja": "デッキ {deck} に切り替えました。", "en": "Switched to deck {deck}."},
@@ -443,4 +450,64 @@ STRINGS = {
     "st_dj_hold_off": {"ja": "ループ固定 OFF — 8 小節ごとに次のフレーズへ進みます。",
                        "en": "Hold OFF — advancing to a new phrase every 8 bars."},
     "st_dj_noise": {"ja": "ノイズ量を {level} にしました。", "en": "Noise level set to {level}."},
+    # パートごとの音作り (音色 = メロディならパルス幅、長さ = ゲート)
+    "dj_part_label": {"ja": "パート", "en": "Part"},
+    "st_dj_part_tone": {"ja": "デッキ {deck} の{part}の音色を {tone} にしました。",
+                        "en": "Deck {deck} {part} tone → {tone}."},
+    "st_dj_part_gate": {"ja": "デッキ {deck} の{part}の長さを {gate} にしました。",
+                        "en": "Deck {deck} {part} length → {gate}."},
+    # 履歴・お気に入りのクリア
+    "dj_clear": {"ja": "クリア", "en": "Clear"},
+    "st_dj_hist_cleared": {"ja": "履歴を消しました。", "en": "History cleared."},
+    "st_dj_fav_cleared": {"ja": "お気に入りを消しました。", "en": "Favorites cleared."},
+    # セット録音
+    "dj_record": {"ja": "⏺ 録音", "en": "⏺ Record"},
+    "dj_record_stop": {"ja": "■ 停止して保存", "en": "■ Stop & save"},
+    "dj_rec_save_title": {"ja": "録音を保存", "en": "Save recording"},
+    "dj_rec_filename": {"ja": "picoseq_set.wav", "en": "picoseq_set.wav"},
+    "st_dj_rec_start": {"ja": "録音を開始しました。もう一度押すと保存します。",
+                        "en": "Recording… press again to stop and save."},
+    "st_dj_rec_saved": {"ja": "録音 ({sec} 秒) を WAV に保存しました。",
+                        "en": "Saved the recording ({sec}s) as WAV."},
+    "st_dj_rec_empty": {"ja": "録音された音がありませんでした。",
+                        "en": "Nothing was recorded."},
+    "st_dj_rec_discarded": {"ja": "録音を保存せずに破棄しました。",
+                            "en": "Recording discarded (not saved)."},
+    "st_dj_rec_error": {"ja": "録音を保存できませんでした: {error}",
+                        "en": "Could not save the recording: {error}"},
+    "st_dj_rec_unavailable": {"ja": "この環境では録音を使えません (ストリーミング再生が必要)。",
+                              "en": "Recording is not available here (needs streaming audio)."},
+    # 音色 (デッキごと)
+    "st_dj_sound": {"ja": "デッキ {deck} の音色を「{label}」に。",
+                    "en": "Deck {deck} sound → \"{label}\"."},
+    # SYNC (もう一方のデッキへテンポ・キーを合わせる)
+    "dj_sync": {"ja": "SYNC", "en": "SYNC"},
+    "st_dj_sync": {"ja": "デッキ {deck} を {bpm} / {key} に合わせました。",
+                   "en": "Deck {deck} synced to {bpm} / {key}."},
+    "st_dj_sync_same": {"ja": "デッキ {deck} はすでに合っています。",
+                        "en": "Deck {deck} is already in sync."},
+    # 履歴・お気に入り
+    "dj_history": {"ja": "🕘 履歴 (流したフレーズ)", "en": "🕘 History (phrases played)"},
+    "dj_favorites": {"ja": "★ お気に入り", "en": "★ Favorites"},
+    "dj_log_empty": {"ja": "— まだありません", "en": "— nothing yet"},
+    "dj_entry": {"ja": "{mood} / {key} / {bpm} / {sound}",
+                 "en": "{mood} / {key} / {bpm} / {sound}"},
+    "dj_fav_now": {"ja": "★ 登録", "en": "★ Save"},
+    "dj_keep_now": {"ja": "💾 残す", "en": "💾 Keep"},
+    "dj_tip_fav": {"ja": "★ お気に入りに登録 / 解除 (次回起動でも残ります)。",
+                   "en": "★ Add to / remove from favorites (kept between runs)."},
+    "dj_tip_recall_a": {"ja": "このフレーズをデッキ A へ呼び戻します。",
+                        "en": "Recall this phrase onto deck A."},
+    "dj_tip_recall_b": {"ja": "このフレーズをデッキ B へ呼び戻します。",
+                        "en": "Recall this phrase onto deck B."},
+    "dj_tip_keep": {"ja": "このフレーズをパターンとして保存します。",
+                    "en": "Save this phrase into a pattern slot."},
+    "st_dj_fav_add": {"ja": "★ お気に入りに登録しました。", "en": "★ Added to favorites."},
+    "st_dj_fav_remove": {"ja": "お気に入りから外しました。", "en": "Removed from favorites."},
+    "st_dj_recall": {"ja": "デッキ {deck} に「{label}」を呼び戻しました (ループ固定 ON)。",
+                     "en": "Recalled \"{label}\" onto deck {deck} (hold ON)."},
+    "dj_keep_name": {"ja": "DJ {mood} {bpm}", "en": "DJ {mood} {bpm}"},
+    "st_dj_keep": {"ja": "パターン {n} に保存しました。", "en": "Saved into pattern {n}."},
+    "st_dj_keep_full": {"ja": "パターンの空きがありません。パターン画面で整理してください。",
+                        "en": "No empty pattern slot — tidy up on the Pattern screen."},
 }

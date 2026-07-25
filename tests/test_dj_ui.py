@@ -5,7 +5,8 @@ Tk のルートは作らない — 純粋関数だけを確認する。
 
 import unittest
 
-from picoseq.core.constants import PITCH_MAX, PITCH_MIN
+from picoseq.core.constants import PITCH_MAX, PITCH_MIN, SOUND_SETS
+from picoseq.ui import theme
 from picoseq.ui.app import DJ_ADVANCE_LOOPS, PicoSeqApp
 from picoseq.ui.dj_view import angle_diff
 
@@ -56,6 +57,34 @@ class TestAngleDiff(unittest.TestCase):
         for a in range(0, 360, 13):
             for b in range(0, 360, 29):
                 self.assertTrue(-180 <= angle_diff(a, b) <= 180)
+
+
+class TestDeckDefaults(unittest.TestCase):
+    """_new_dj_deck は Tk 無しで呼べる (staticmethod)。"""
+
+    def test_has_every_per_deck_setting(self):
+        deck = PicoSeqApp._new_dj_deck("major", 1, 120)
+        for field in ("scale", "key", "sound", "seed", "bpm", "noise", "filter",
+                      "hold", "muted"):
+            self.assertIn(field, deck)
+
+    def test_sound_defaults_and_overrides(self):
+        self.assertEqual(PicoSeqApp._new_dj_deck("major", 1, 120)["sound"], "retro8")
+        self.assertEqual(
+            PicoSeqApp._new_dj_deck("major", 1, 120, 0, "warm16")["sound"], "warm16")
+
+    def test_decks_do_not_share_the_mute_set(self):
+        """可変オブジェクトを共有すると片方の KILL が両方に効いてしまう。"""
+        a = PicoSeqApp._new_dj_deck("major", 1, 120)
+        b = PicoSeqApp._new_dj_deck("major", 2, 120)
+        a["muted"].add(0)
+        self.assertNotIn(0, b["muted"])
+
+
+class TestSoundIds(unittest.TestCase):
+    def test_view_and_core_agree(self):
+        """デッキの音色セレクタは theme.SOUND_IDS 順で引く — コアと並びが同じこと。"""
+        self.assertEqual(tuple(theme.SOUND_IDS), tuple(SOUND_SETS))
 
 
 if __name__ == "__main__":

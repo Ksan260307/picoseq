@@ -4,8 +4,8 @@
 コード進行の上に ベース → サブ → リズム → メロディ の順で 4 パートを重ねる。
 
 パートごとに多数の「演奏スタイル」を用意し、シード値でその組み合わせを選ぶ。
-  ベース  6 種 × 伴奏 5 種 × リズム 6 種 × メロディのリズム 4 種 × 展開 3 種
-= 4000 通り超の下地に、各パートの音選びの乱数が乗る。
+  ベース  9 種 × 伴奏 7 種 × リズム 9 種 × メロディのリズム 6 種 × 展開 4 種
+= 13000 通り超の下地に、各パートの音選びの乱数が乗る。
 """
 
 from .constants import (
@@ -26,11 +26,11 @@ from .prng import Rng
 DRUM_PITCH = 60  # リズムは音程を持たない (描画位置として使う)
 
 # 各パートのスタイル数 (シード値で 1 つ選ぶ)
-BASS_STYLES = 6
-BACKING_STYLES = 5
-DRUM_STYLES = 6
-MELODY_RHYTHMS = 4
-MOTIF_MODES = 3
+BASS_STYLES = 9
+BACKING_STYLES = 7
+DRUM_STYLES = 9
+MELODY_RHYTHMS = 6
+MOTIF_MODES = 4
 
 
 def compose(beats: int, key: int, scale_id: str, seed: int,
@@ -157,7 +157,7 @@ def _compose_notes(beats, key, scale_id, seed, progression, custom, with_melody)
 
 
 def _compose_bass(notes, emit, rng, beats, scale_id, steps, chord_of, style=0):
-    """ベース (三角波): 6 種類の型から選ぶ。曲調で細部が変わる。"""
+    """ベース (三角波): 9 種類の型から選ぶ。曲調で細部が変わる。"""
     msteps = beats * 4
     half = max(2, msteps // 2)
     drive = scale_id == "battle"  # 激しい曲は隙間を詰める
@@ -210,12 +210,40 @@ def _compose_bass(notes, emit, rng, beats, scale_id, steps, chord_of, style=0):
                 hit, pitch = True, chord.fifth - 12
             elif step % 2 == 1 and rng.chance(0.4):
                 hit, pitch = True, chord.third - 12
-        else:
+        elif style == 5:
             # アルペジオ・ベース: 小節をかけて 根音→3度→5度→8度
             if step % 2 == 0 or drive:
                 hit = True
                 arp = (chord.root, chord.third, chord.fifth, chord.root + 12)
                 pitch = arp[(step // 2) % 4] - 12
+        elif style == 6:
+            # オフビート・プッシュ: 拍の頭と各拍の「ウラ」で押す
+            if pos == 0:
+                hit, dur = True, 2
+            elif step % 4 == 2:
+                hit, pitch = True, chord.fifth - 12
+            elif drive and step % 2 == 0:
+                hit, pitch = True, chord.third - 12
+        elif style == 7:
+            # ハーフノート・バラード: 根音と5度を半小節ずつ大きく伸ばす
+            if pos == 0:
+                hit, dur = True, max(2, half)
+            elif pos == half:
+                hit, pitch, dur = True, chord.fifth - 12, max(2, msteps - half)
+            elif drive and step % 4 == 2:
+                hit = True
+        else:
+            # オクターブ・ラン (8分): 低根音→高根音→5度→3度 を駆け上がる
+            if step % 2 == 0 or drive:
+                hit = True
+                run = (chord.root - 12, chord.root, chord.fifth - 12, chord.third)
+                pitch = run[(step // 2) % 4]
+                if pos == 0:
+                    dur = 2
+
+        # 激しい曲 (battle) は、どのスタイルでもベースの隙間を root で詰めて厚くする
+        if drive and not hit and step % 2 == 0 and rng.chance(0.85):
+            hit = True
 
         if pitch < PITCH_MIN:
             pitch += 12
@@ -224,7 +252,8 @@ def _compose_bass(notes, emit, rng, beats, scale_id, steps, chord_of, style=0):
 
 
 def _compose_backing(notes, emit, rng, scale_id, steps, chord_of, style=0):
-    """サブ (ノコギリ波): 5 種類の和音の添え方。"""
+    """サブ (ノコギリ波): 7 種類の和音の添え方。"""
+    heavy = scale_id == "battle"
     for step in range(steps):
         chord = chord_of(step)
         hit = False
@@ -259,12 +288,29 @@ def _compose_backing(notes, emit, rng, scale_id, steps, chord_of, style=0):
             if step % 4 == 0:
                 hit, dur = True, 3
                 pitch = chord.third if (step // 4) % 2 else chord.fifth
-        else:
+        elif style == 4:
             # シンコペーションの刺し (16分の裏)
             if step % 4 == 1 or step % 4 == 3:
                 if rng.chance(0.7):
                     hit = True
                     pitch = chord.fifth if step % 4 == 1 else chord.third
+        elif style == 5:
+            # 下降アルペジオ (8分): 高い根音から降りてくる
+            if step % 2 == 0 and rng.chance(0.85):
+                hit = True
+                arp = (chord.root + 12, chord.fifth, chord.third, chord.root)
+                pitch = arp[(step // 2) % 4]
+        else:
+            # オクターブ・スタブ: 拍頭で高い和音を短く刺す
+            if step % 4 == 0 and rng.chance(0.9):
+                hit, dur = True, 2
+                pitch = chord.root + 12 if (step // 4) % 2 == 0 else chord.fifth
+            elif step % 4 == 2 and rng.chance(0.5):
+                hit, pitch = True, chord.third
+
+        # 激しい曲 (battle) は、どのスタイルでも隙間を 3 度/5 度で刺して厚くする
+        if heavy and not hit and step % 2 == 1 and rng.chance(0.6):
+            hit, pitch = True, chord.fifth if step % 4 == 1 else chord.third
 
         if pitch < PITCH_MIN:
             pitch += 12
@@ -273,7 +319,7 @@ def _compose_backing(notes, emit, rng, scale_id, steps, chord_of, style=0):
 
 
 def _compose_drums(notes, emit, rng, beats, scale_id, steps, style=0):
-    """リズム (ノイズ): 6 種類のドラムパターン。小節頭は必ず芯を置く。"""
+    """リズム (ノイズ): 9 種類のドラムパターン。小節頭は必ず芯を置く。"""
     msteps = beats * 4
     heavy = scale_id == "battle"
     for step in range(steps):
@@ -323,11 +369,33 @@ def _compose_drums(notes, emit, rng, beats, scale_id, steps, style=0):
                 hit = True
             elif rng.chance(0.2):
                 hit = True
-        else:
+        elif style == 5:
             # まばら: 芯だけ残す
             if pos == msteps // 2:
                 hit, dur = True, 2
             elif step % 4 == 0 and rng.chance(0.3):
+                hit = True
+        elif style == 6:
+            # 16分シャッフル: 8分の芯に跳ねる 16 分を散らす
+            if step % 2 == 0:
+                hit = True
+            elif step % 4 == 3 and rng.chance(0.7):
+                hit = True
+            elif rng.chance(0.25):
+                hit = True
+        elif style == 7:
+            # トライバル (タム連打): 頭と各拍終わりを叩く
+            if step % 4 == 0:
+                hit, dur = True, 2
+            elif step % 4 == 3:
+                hit = True
+            elif step % 8 == 6 and rng.chance(0.6):
+                hit = True
+        else:
+            # 倍テン (煽り): ほぼ全ステップを詰めて盛り上げる
+            if step % 2 == 0:
+                hit = True
+            elif rng.chance(0.9 if heavy else 0.7):
                 hit = True
 
         if heavy and not hit and step % 2 == 0 and rng.chance(0.5):
@@ -340,7 +408,8 @@ def _onset_prob(step, msteps, rhythm):
     """メロディのリズム型ごとに、そのステップで音を出す確率を返す。
 
     rhythm 0: なめらか (表拍中心) / 1: 弾む (裏拍多め) /
-           2: 引き延ばし (音数少なめ) / 3: 細かい (16分多め)
+           2: 引き延ばし (音数少なめ) / 3: 細かい (16分多め) /
+           4: 付点・ギャロップ (拍頭と付点位置) / 5: シンコペ (裏拍主役)
     """
     on_beat = step % 4 == 0
     off_beat = step % 2 == 1
@@ -350,7 +419,17 @@ def _onset_prob(step, msteps, rhythm):
         return 0.85 if on_beat else (0.7 if off_beat else 0.4)
     if rhythm == 2:
         return 0.85 if on_beat else 0.12
-    return 0.9 if on_beat else 0.6  # rhythm 3: 細かい
+    if rhythm == 3:
+        return 0.9 if on_beat else 0.6  # 細かい
+    if rhythm == 4:
+        # 付点・ギャロップ: 拍頭を強く、拍の直前 (16分裏) を弾ませる
+        if on_beat:
+            return 0.9
+        return 0.6 if step % 4 == 3 else 0.2
+    # rhythm 5: シンコペ — 表拍を抜いて裏拍を主役にする
+    if on_beat:
+        return 0.4
+    return 0.8 if off_beat else 0.5
 
 
 def _compose_melody(notes, emit, rng, beats, key, scale_id, steps, chord_of,
@@ -358,8 +437,8 @@ def _compose_melody(notes, emit, rng, beats, key, scale_id, steps, chord_of,
     """メロディ (パルス波): 1小節目でモチーフを作り、2小節目で展開して終止する。
 
     rhythm でリズムの型、motif_mode で 2 小節目の展開の仕方が変わる。
-      motif_mode 0: そのまま反復 / 1: 全体を音階内で上へずらす (シーケンス) /
-                 2: 山を上下反転 (ミラー)
+      motif_mode 0: そのまま反復 / 1: 上へずらす (上行シーケンス) /
+                 2: 山を上下反転 (ミラー) / 3: 下へずらす (下行シーケンス)
     """
     msteps = beats * 4
     melody_notes = [p for p in scale_pitches(key, scale_id, custom=custom)
@@ -431,11 +510,14 @@ def _develop_motif(motif_entry, mode, center, count):
     """2 小節目でモチーフを展開する。返り値は (音のインデックス, 長さ)。"""
     index, dur = motif_entry
     if mode == 1:
-        # シーケンス: 音階内で 2 度上へ持ち上げる
+        # 上行シーケンス: 音階内で 2 度上へ持ち上げる
         return min(count - 1, index + 2), dur
     if mode == 2:
         # ミラー: 中心の音を軸に上下を反転する
         return max(0, min(count - 1, 2 * center - index)), dur
+    if mode == 3:
+        # 下行シーケンス: 音階内で 2 度下へ落とす
+        return max(0, index - 2), dur
     return index, dur  # そのまま反復
 
 

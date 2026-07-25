@@ -21,9 +21,14 @@ class TestSoundSets(unittest.TestCase):
         self.assertEqual(SOUND_SETS, ("retro8", "warm16", "clear32"))
         self.assertEqual(DEFAULT_SOUND, "retro8")
 
-    def test_default_is_bit_identical_to_legacy(self):
-        """既定の retro8 は、音色セット導入前とビット単位で同じ音を出す。"""
-        golden = {0: 132701679, 1: 2680058093, 2: 3794188056, 3: 3051989150}
+    def test_default_matches_golden(self):
+        """既定の retro8 の各波形を回帰検査する。
+
+        メロディ(0)/リズム(2)/サブ(3) は音色セット導入前とビット単位で同じ。
+        ベース(1=三角波) だけは、低音が小型スピーカーで聞こえないため倍音を重ねて
+        可聴化した (擬似ベース強調) ので、意図的に旧版と異なる。
+        """
+        golden = {0: 132701679, 1: 71178892, 2: 3794188056, 3: 3051989150}
         for wave, crc in golden.items():
             with self.subTest(wave=wave):
                 voice = render_voice(wave, 60, 5512, 50, 80)

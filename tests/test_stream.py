@@ -135,5 +135,61 @@ class TestChunks(unittest.TestCase):
         self.assertEqual(_samples(player._next_chunk()), [0, 0, 0, 0])
 
 
+class TestRecording(unittest.TestCase):
+    def _player(self, frames):
+        return StreamPlayer(rate=44100, frames=frames, buffers=2)
+
+    def test_captures_the_played_mix(self):
+        """録音は、送り出したチャンクをそのまま (聞こえた通りに) 残す。"""
+        player = self._player(4)
+        player.set_loop(_pcm([5, 6, 7, 8]))
+        player.start_record()
+        player._next_chunk()                        # 5,6,7,8
+        player.set_loop(_pcm([1, 2, 3, 4]))
+        player._next_chunk()                        # 1,2,3,4
+        pcm = player.stop_record()
+        self.assertEqual(_samples(pcm), [5, 6, 7, 8, 1, 2, 3, 4])
+
+    def test_includes_oneshot_overlay(self):
+        """スクラッチ等の重ね (oneshot) も録音に入る。"""
+        player = self._player(4)
+        player.set_loop(_pcm([100] * 4))
+        player.play_oneshot(_pcm([10, 10]))
+        player.start_record()
+        player._next_chunk()
+        self.assertEqual(_samples(player.stop_record()), [110, 110, 100, 100])
+
+    def test_not_recording_by_default(self):
+        player = self._player(4)
+        player.set_loop(_pcm([1] * 4))
+        player._next_chunk()
+        self.assertFalse(player.is_recording)
+        self.assertEqual(player.stop_record(), b"")
+
+    def test_is_recording_flag(self):
+        player = self._player(4)
+        self.assertFalse(player.is_recording)
+        player.start_record()
+        self.assertTrue(player.is_recording)
+        player.stop_record()
+        self.assertFalse(player.is_recording)
+
+    def test_records_silence_when_idle(self):
+        """何も鳴っていなくても、その無音がそのまま録音される (連続キャプチャ)。"""
+        player = self._player(4)
+        player.start_record()
+        player._next_chunk()
+        self.assertEqual(_samples(player.stop_record()), [0, 0, 0, 0])
+
+    def test_respects_byte_cap(self):
+        player = self._player(4)
+        player._rec_max = 8                          # 2 チャンク (4 サンプル×2byte) で頭打ち
+        player.set_loop(_pcm([1] * 4))
+        player.start_record()
+        for _ in range(5):
+            player._next_chunk()
+        self.assertEqual(len(player.stop_record()), 8)
+
+
 if __name__ == "__main__":
     unittest.main()

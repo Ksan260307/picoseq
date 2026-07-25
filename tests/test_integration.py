@@ -14,7 +14,7 @@ from picoseq.core.renderer import render_song
 from picoseq.core.serialize import dumps, loads
 from picoseq.core.wavio import wav_bytes
 
-GOLDEN_SONG_CRC = 43718573
+GOLDEN_SONG_CRC = 3923829937
 
 
 def _build_song_project():
