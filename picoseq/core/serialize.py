@@ -55,9 +55,9 @@ def to_jsonable(project: Project) -> dict:
         "progression": list(project.progression) if project.progression is not None else None,
         "custom_scale": list(project.custom_scale) if project.custom_scale is not None else None,
         "sound": project.sound,
-        # parts[wave] = レイヤーごとの {tone, gate} の並び
-        "parts": [[{"tone": p.tone, "gate": p.gate} for p in layers]
-                  for layers in project.parts],
+        # parts[wave] = レイヤーごとの {tone, gate, volume} の並び
+        "parts": [[{"tone": p.tone, "gate": p.gate, "volume": p.volume}
+                   for p in layers] for layers in project.parts],
         "phrase": _notes_to_json(project.phrase),
         "patterns": [
             {"used": p.used, "notes": _notes_to_json(p.notes), "name": p.name}
@@ -239,7 +239,8 @@ def _parts_from_json(raw) -> tuple:
             d = d if isinstance(d, dict) else {}
             tone = clamp(_as_int(d.get("tone"), 50), 0, 100)
             gate = clamp(_as_int(d.get("gate"), 80), 10, 100)
-            layers.append(PartParams(tone=tone, gate=gate))
+            volume = clamp(_as_int(d.get("volume"), 100), 0, 100)  # 旧データは 100
+            layers.append(PartParams(tone=tone, gate=gate, volume=volume))
         parts.append(tuple(layers) if layers else (PartParams(),))
     return tuple(parts)
 

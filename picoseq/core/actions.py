@@ -145,6 +145,10 @@ def set_part_gate(project: Project, wave: int, gate: int, layer: int = 0) -> Pro
     return _set_layer_field(project, wave, layer, gate=clamp(int(gate), 10, 100))
 
 
+def set_part_volume(project: Project, wave: int, volume: int, layer: int = 0) -> Project:
+    return _set_layer_field(project, wave, layer, volume=clamp(int(volume), 0, 100))
+
+
 def add_layer(project: Project, wave: int) -> Project:
     """パートにレイヤーを 1 つ足す (最大 MAX_LAYERS)。既存の設定を引き継ぐ。"""
     _check_part(wave)

@@ -101,8 +101,9 @@ _ENTRY_FIELDS = (
     ("bpm", "int", 120),
     ("sound", "str", "retro8"),
     ("noise", "int", 0),
-    ("tones", "ints4", (50, 50, 50, 50)),   # パートごとの音色 0..100
-    ("gates", "ints4", (80, 80, 80, 80)),   # パートごとの長さ 10..100
+    ("tones", "ints4", (50, 50, 50, 50)),      # パートごとの音色 0..100
+    ("gates", "ints4", (80, 80, 80, 80)),      # パートごとの長さ 10..100
+    ("volumes", "ints4", (100, 100, 100, 100)),  # パートごとの音量 0..100
     ("seed", "int", 1),
 )
 
@@ -124,12 +125,14 @@ def _coerce(kind, value, default):
 
 
 def make_entry(scale, key, bpm, sound, noise, seed,
-               tones=(50, 50, 50, 50), gates=(80, 80, 80, 80), deck=0) -> dict:
+               tones=(50, 50, 50, 50), gates=(80, 80, 80, 80),
+               volumes=(100, 100, 100, 100), deck=0) -> dict:
     """デッキの現在値から履歴エントリを作る。deck は表示用 (同一性には含めない)。"""
     return {"scale": str(scale), "key": int(key), "bpm": int(bpm),
             "sound": str(sound), "noise": int(noise),
             "tones": tuple(int(v) for v in tones),
             "gates": tuple(int(v) for v in gates),
+            "volumes": tuple(int(v) for v in volumes),
             "seed": int(seed), "deck": int(deck)}
 
 

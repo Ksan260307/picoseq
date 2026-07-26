@@ -1,7 +1,7 @@
 """DJ モードの画面 — 2 枚のターンテーブルと、デッキごとのチャンネルストリップ。
 
 見た目 (回転・脈動・スクラッチ) だけを担当し、状態変更はすべて app のメソッドへ渡す。
-曲調・キー・音色・テンポ・ノイズ・パート音作り(音色/長さ)・フィルター・固定・KILL は**デッキごと独立**。
+曲調・キー・音色・テンポ・ノイズ・パート音作り(音色/長さ/音量)・フィルター・固定・KILL は**デッキごと独立**。
 中央にあるのは共通の操作 (再生・クロスフェーダー・タップ・★/💾・録音) だけ。
 下段は流したフレーズの履歴とお気に入りで、どちらからでもデッキへ呼び戻せる。
 """
@@ -190,6 +190,10 @@ class DJView:
         widgets["part_gate"], widgets["part_gate_var"] = slider_row(
             row, "lbl_gate", 10, 100,
             lambda v, d=deck: self._on_part_gate(d, v), theme.ACCENT)
+        row += 1
+        widgets["part_volume"], widgets["part_volume_var"] = slider_row(
+            row, "lbl_volume", 0, 100,
+            lambda v, d=deck: self._on_part_volume(d, v), theme.ACCENT)
         row += 1
         widgets["filter"], widgets["filter_var"] = slider_row(
             row, "dj_filter", 0, 100,
@@ -485,6 +489,12 @@ class DJView:
         if not self._syncing:
             self.app.dj_set_part_gate(deck, self._part_focus[key], int(float(value)))
 
+    def _on_part_volume(self, deck, value):
+        key = DECK_KEYS[deck]
+        self.decks[key]["part_volume_var"].set(str(int(float(value))))
+        if not self._syncing:
+            self.app.dj_set_part_volume(deck, self._part_focus[key], int(float(value)))
+
     def _on_filter(self, deck, value):
         key = DECK_KEYS[deck]
         self.decks[key]["filter_var"].set(str(int(float(value))))
@@ -512,14 +522,17 @@ class DJView:
             widgets["tempo_var"].set(str(deck_state["bpm"]))
             widgets["noise_var"].set(str(deck_state["noise"]))
             widgets["filter_var"].set(str(deck_state["filter"]))
-            # パートごとの音色・長さ: 選択中のパートの値をスライダーへ
+            # パートごとの音色・長さ・音量: 選択中のパートの値をスライダーへ
             focus = self._part_focus[key]
             tone = deck_state["tones"][focus]
             gate = deck_state["gates"][focus]
+            volume = deck_state["volumes"][focus]
             widgets["part_tone"].set(tone)
             widgets["part_gate"].set(gate)
+            widgets["part_volume"].set(volume)
             widgets["part_tone_var"].set(str(tone))
             widgets["part_gate_var"].set(str(gate))
+            widgets["part_volume_var"].set(str(volume))
             for i, btn in enumerate(widgets["part_btns"]):
                 on = (i == focus)
                 btn.configure(bg=theme.ACCENT if on else theme.BTN_BG,

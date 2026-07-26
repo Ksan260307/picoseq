@@ -91,14 +91,15 @@ def _render_events_python(events, bpm, parts, total_ticks, rate, wrap,
         part = _layer_params(parts, event.wave, event.layer)
         voice = _cached_voice(event.wave, event.pitch, event.dur * spt,
                               part.tone, part.gate, rate, sound)
+        vol = part.volume
         start = event.tick * spt
         if wrap:
             for i, value in enumerate(voice):
-                mix[(start + i) % loop_len] += value
+                mix[(start + i) % loop_len] += value * vol // 100 if vol != 100 else value
         else:
             end = min(len(voice), total - start)
             for i in range(end):
-                mix[start + i] += voice[i]
+                mix[start + i] += voice[i] * vol // 100 if vol != 100 else voice[i]
     return mix
 
 
@@ -115,6 +116,9 @@ def _render_events_numpy(events, bpm, parts, total_ticks, rate, wrap,
         if not voice:
             continue
         varr = _np.asarray(voice, dtype=_np.int64)
+        if part.volume != 100:
+            # 純 Python 経路と同じ切り捨て (負値は下方向) になるよう // を使う
+            varr = varr * part.volume // 100
         start = event.tick * spt
         if wrap:
             _add_wrapped(mix, varr, start, loop_len)

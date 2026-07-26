@@ -115,6 +115,15 @@ class TestSetters(unittest.TestCase):
         with self.assertRaises(ValueError):
             actions.set_part_tone(self.p, 4, 50)
 
+    def test_part_volume(self):
+        self.assertEqual(self.p.parts[1][0].volume, 100)      # 既定は 100
+        p = actions.set_part_volume(self.p, 1, 40)
+        self.assertEqual(p.parts[1][0].volume, 40)
+        self.assertEqual(actions.set_part_volume(self.p, 1, 999).parts[1][0].volume, 100)
+        self.assertEqual(actions.set_part_volume(self.p, 1, -5).parts[1][0].volume, 0)
+        self.assertEqual(p.parts[0], self.p.parts[0])         # 他パートは不変
+        self.assertIs(actions.set_part_volume(self.p, 1, 100), self.p)  # 無変更は同一
+
 
 class TestPhraseEdit(unittest.TestCase):
     def setUp(self):

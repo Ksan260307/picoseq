@@ -2,7 +2,8 @@
 
 APP_ID = "picoseq"
 # v2: progression / v3: custom_scale / v4: sound / v5: パートのレイヤー / v6: パターン名
-SCHEMA_VERSION = 6
+# v7: パートごとの音量
+SCHEMA_VERSION = 7
 
 # パターン名の最大文字数
 PATTERN_NAME_MAX = 24

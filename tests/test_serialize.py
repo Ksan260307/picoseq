@@ -238,6 +238,15 @@ class TestSanitize(unittest.TestCase):
         self.assertEqual(p.parts[1][0].tone, 50)  # 既定値
         self.assertEqual(len(p.patterns), 8)
 
+    def test_volume_roundtrip(self):
+        p = actions.set_part_volume(new_project(), 2, 35)
+        self.assertEqual(loads(dumps(p)).parts[2][0].volume, 35)
+
+    def test_pre_v7_data_defaults_volume_to_100(self):
+        """v6 以前 (volume 無し) のパートは音量 100 になる (後方互換)。"""
+        p = self._load_with(parts=[{"tone": 10, "gate": 20}])  # volume 欄なし
+        self.assertEqual(p.parts[0][0].volume, 100)
+
 
 class TestLegacyImport(unittest.TestCase):
     """旧版 (main.html) の retro_project.json を移行できる。"""

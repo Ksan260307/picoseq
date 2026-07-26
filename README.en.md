@@ -109,7 +109,8 @@ and also uploads a Windows exe on tags.
 - **Zoom** — the － / 100% / ＋ in the Piano roll header, or Ctrl+wheel over the board
 - **Panels** — drag the divider between "Controls" and "Piano roll" to resize; "⧉ Detach" pops a
   panel into its own window, "⧈ Dock" returns it
-- Shape each part (layer)'s sound with the *tone* and *length* sliders
+- Shape each part (layer)'s sound with the *tone*, *length* and *volume* sliders — use
+  *volume* to balance the mix (e.g. bring up the bass, pull down the rhythm)
 - **✨ Auto-compose** — each press picks a fresh seed value; type a number and press Enter to recreate that exact tune
 - **🎤 From humming** — record 6 seconds (or open a WAV file) to extract a melody
 - **🎸 Auto-accompany** — generates the other three parts to fit your melody
@@ -172,10 +173,10 @@ The imported scale stays available in the mood selector as *📷 Photo Scale*.
   - **Sound**: the same 3 sound sets as the Phrase screen, per deck. In DJ mode the
     **palette stays put**, so the discs never jump and A and B can hold different sounds
   - **Noise** (0–4): hi-hat-style ticks and build-up rolls
-  - **Tone / Length (per part)**: pick Melody / Bass / Rhythm / Sub under "Part", then dial in
+  - **Tone / Length / Volume (per part)**: pick Melody / Bass / Rhythm / Sub under "Part", then dial in
     that part's **Tone** (for the melody, the pulse-wave duty cycle 12.5%–50%: **thin blip ⇄
-    fat square**) and **Length** (gate — shorter is punchier, longer sustains). The notes
-    stay the same; only the sound design changes
+    fat square**), **Length** (gate — shorter is punchier, longer sustains) and **Volume**
+    (mix balance). The notes stay the same; only the sound design changes
   - **Filter**: sweep a low-pass (dark ⇄ open)
   - **Hold loop**: stop advancing and loop that deck's phrase
   - **KILL**: instantly mute a part (melody / bass / rhythm / sub)

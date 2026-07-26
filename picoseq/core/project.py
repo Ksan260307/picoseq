@@ -11,8 +11,9 @@ from .song import EMPTY_SONG
 @dataclass(frozen=True)
 class PartParams:
     """1 レイヤーの音作りパラメータ (整数 %)。"""
-    tone: int = 50  # 音色 0..100
-    gate: int = 80  # 音の長さ 10..100
+    tone: int = 50    # 音色 0..100
+    gate: int = 80    # 音の長さ 10..100
+    volume: int = 100  # 音量 0..100 (100=そのまま。下げるとミックスで小さくなる)
 
 
 @dataclass(frozen=True)

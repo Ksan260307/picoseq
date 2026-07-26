@@ -177,6 +177,7 @@ STRINGS = {
     "lbl_part": {"ja": "パート", "en": "Part"},
     "lbl_tone": {"ja": "音色", "en": "Tone"},
     "lbl_gate": {"ja": "長さ", "en": "Length"},
+    "lbl_volume": {"ja": "音量", "en": "Volume"},
     "btn_reverse": {"ja": "🔄 反転", "en": "🔄 Reverse"},
     "btn_register": {"ja": "★ 登録", "en": "★ Save pat."},
     "btn_clear": {"ja": "🗑 クリア", "en": "🗑 Clear"},
@@ -456,6 +457,8 @@ STRINGS = {
                         "en": "Deck {deck} {part} tone → {tone}."},
     "st_dj_part_gate": {"ja": "デッキ {deck} の{part}の長さを {gate} にしました。",
                         "en": "Deck {deck} {part} length → {gate}."},
+    "st_dj_part_volume": {"ja": "デッキ {deck} の{part}の音量を {volume} にしました。",
+                          "en": "Deck {deck} {part} volume → {volume}."},
     # 履歴・お気に入りのクリア
     "dj_clear": {"ja": "クリア", "en": "Clear"},
     "st_dj_hist_cleared": {"ja": "履歴を消しました。", "en": "History cleared."},

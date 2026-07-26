@@ -47,8 +47,8 @@ SECTIONS_JA = [
                           "曲調・キー・音色を変えてもフレーズの骨格は保たれます (作り直すのは 🎲 生成 のみ)。"),
         ("SYNC", "もう一方のデッキへテンポとキーを合わせます。曲調・音色はそのままなので、"
                  "別の曲調のまま拍とキーだけ揃えて重ねられます。"),
-        ("音色 / 長さ (パートごと)", "「パート」で メロディ/ベース/リズム/サブ を選び、そのパートの音色と長さを調整します。"
-                              "音色はメロディならパルス波のデューティ比 (細い電子音⇄太い矩形波)、長さはゲート (歯切れ⇄伸び)。"
+        ("音色 / 長さ / 音量 (パートごと)", "「パート」で メロディ/ベース/リズム/サブ を選び、そのパートの音色・長さ・音量を調整します。"
+                              "音色はメロディならパルス波のデューティ比 (細い電子音⇄太い矩形波)、長さはゲート (歯切れ⇄伸び)、音量はミックスのバランス。"
                               "音符は変えず音作りだけが変わります。"),
         ("ノイズ / フィルター / KILL", "ノイズや掃引フィルターで盛り上げ、KILL で各パートを即消音。タップでテンポ合わせ。"
                                   "つまみはすべてデッキごとに独立し、その場で音に反映されます。"),
@@ -91,7 +91,7 @@ SECTIONS_EN = [
         ("Preview", "Click the keys on the left edge to hear that pitch."),
         ("Switch part", "The \"Part\" buttons, or keys 1-4. Four voices: Melody, Bass, Rhythm, Sub."),
         ("Layers", "Each part can stack up to 8 layers via \"＋ Add\". Layers get their own tone and notes, and Auto fills each one."),
-        ("Tone / Length", "Adjust the brightness (tone) and length per selected part (layer)."),
+        ("Tone / Length / Volume", "Adjust the brightness (tone), length and volume per selected part (layer). Volume balances the mix."),
         ("Transpose / Reverse", "🔼🔽 (or Ctrl+↑↓) shift one octave. 🔄 reverses the phrase in time."),
         ("Clear a part", "Right-click a part button to erase just that part's notes."),
     ]),
@@ -125,8 +125,8 @@ SECTIONS_EN = [
                                "None of them rewrite the phrase's shape — only 🎲 Roll does."),
         ("SYNC", "Matches tempo and key to the other deck. Mood and sound are left alone, so you can "
                  "layer two different moods that share a beat and a key."),
-        ("Tone / Length (per part)", "Pick Melody/Bass/Rhythm/Sub under \"Part\", then adjust that part's tone and length. "
-                                     "Tone is the melody's pulse-wave duty cycle (thin blip ⇄ fat square); length is the gate (punchy ⇄ sustained). "
+        ("Tone / Length / Volume (per part)", "Pick Melody/Bass/Rhythm/Sub under \"Part\", then adjust that part's tone, length and volume. "
+                                     "Tone is the melody's pulse-wave duty cycle (thin blip ⇄ fat square); length is the gate (punchy ⇄ sustained); volume balances the mix. "
                                      "The notes stay the same, only the sound design changes."),
         ("Noise / Filter / KILL", "Add noise or sweep a filter to build energy; KILL instantly mutes a part. Tap sets tempo. "
                                   "Every control is per-deck and applies immediately."),

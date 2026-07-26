@@ -427,8 +427,18 @@ class PicoSeqApp:
             command=self._on_gate_change, bg=theme.PANEL, troughcolor=theme.BTN_BG,
             highlightthickness=0, bd=0, activebackground=theme.ACCENT,
         )
-        self.gate_scale.pack(side="left", padx=2)
+        self.gate_scale.pack(side="left", padx=(2, 12))
         self._attach_gesture(self.gate_scale)
+
+        tk.Label(bar2, text=t("lbl_volume"), font=theme.FONT_SMALL,
+                 bg=theme.PANEL, fg=theme.TEXT_DIM).pack(side="left")
+        self.volume_scale = tk.Scale(
+            bar2, from_=0, to=100, orient="horizontal", length=110, showvalue=0,
+            command=self._on_volume_change, bg=theme.PANEL, troughcolor=theme.BTN_BG,
+            highlightthickness=0, bd=0, activebackground=theme.ACCENT,
+        )
+        self.volume_scale.pack(side="left", padx=2)
+        self._attach_gesture(self.volume_scale)
 
         self._button(bar2, "🔼", self.transpose_up).pack(side="left", padx=(8, 1))
         self._button(bar2, "🔽", self.transpose_down).pack(side="left", padx=1)
@@ -632,6 +642,7 @@ class PicoSeqApp:
             params = part_params(p, self.part, self.layer)
             self.tone_scale.set(params.tone)
             self.gate_scale.set(params.gate)
+            self.volume_scale.set(params.volume)
         finally:
             self._syncing = False
         self._update_part_buttons()
@@ -901,6 +912,7 @@ class PicoSeqApp:
         try:
             self.tone_scale.set(params.tone)
             self.gate_scale.set(params.gate)
+            self.volume_scale.set(params.volume)
         finally:
             self._syncing = False
 
@@ -1375,6 +1387,7 @@ class PicoSeqApp:
         """
         return {"scale": scale, "key": key, "sound": sound, "seed": seed, "bpm": bpm,
                 "noise": 0, "tones": [50, 50, 50, 50], "gates": [80, 80, 80, 80],
+                "volumes": [100, 100, 100, 100],
                 "filter": 100, "hold": False, "muted": set()}
 
     def _dj_scale_label(self, scale_id) -> str:
@@ -1419,10 +1432,11 @@ class PicoSeqApp:
         p = actions.set_bpm(p, deck["bpm"])
         p = actions.set_seed(p, seed)
         p = actions.generate_phrase(p)
-        for wave in range(PART_COUNT):              # パートごとの音色・長さ (全レイヤーに適用)
+        for wave in range(PART_COUNT):              # パートごとの音色・長さ・音量 (全レイヤーへ)
             for layer in range(layer_count(p, wave)):
                 p = actions.set_part_tone(p, wave, deck["tones"][wave], layer)
                 p = actions.set_part_gate(p, wave, deck["gates"][wave], layer)
+                p = actions.set_part_volume(p, wave, deck["volumes"][wave], layer)
         if deck["noise"] > 0:
             from ..core.phrase import active_notes, build_phrase
             notes = [n for _, n in active_notes(p.phrase)]
@@ -1479,7 +1493,8 @@ class PicoSeqApp:
         deck = self._dj_deck()
         return (self._dj_want_seed, deck["scale"], deck["key"], deck["sound"],
                 deck["bpm"], deck["noise"], tuple(deck["tones"]), tuple(deck["gates"]),
-                deck["filter"], tuple(sorted(deck["muted"])), self.dj_active)
+                tuple(deck["volumes"]), deck["filter"], tuple(sorted(deck["muted"])),
+                self.dj_active)
 
     def _dj_render_next(self):
         """予約したフレーズのループを裏スレッドで作り、_dj_pending へ置く。"""
@@ -1671,7 +1686,8 @@ class PicoSeqApp:
         state = self.dj_decks[index]
         return dj_core.make_entry(state["scale"], state["key"], state["bpm"],
                                   state["sound"], state["noise"], state["seed"],
-                                  tones=state["tones"], gates=state["gates"], deck=index)
+                                  tones=state["tones"], gates=state["gates"],
+                                  volumes=state["volumes"], deck=index)
 
     def _dj_record_history(self, deck=None):
         """フレーズが**流れ始めた**ところで履歴へ残す (自動進行・生成・デッキ切替)。"""
@@ -1785,9 +1801,10 @@ class PicoSeqApp:
         state["key"] = max(0, min(11, entry["key"]))
         state["bpm"] = max(BPM_MIN, min(BPM_MAX, entry["bpm"]))
         state["noise"] = max(0, min(4, entry["noise"]))
-        clean = dj_core.sanitize_entries([entry])[0]   # tones/gates を 4 個・整数に整える
+        clean = dj_core.sanitize_entries([entry])[0]   # tones/gates/volumes を 4 個・整数に
         state["tones"] = [max(0, min(100, v)) for v in clean["tones"]]
         state["gates"] = [max(10, min(100, v)) for v in clean["gates"]]
+        state["volumes"] = [max(0, min(100, v)) for v in clean["volumes"]]
         if entry["sound"] in theme.SOUND_IDS:
             state["sound"] = entry["sound"]
         state["seed"] = entry["seed"]
@@ -1808,13 +1825,14 @@ class PicoSeqApp:
             self.alert(t("st_dj_keep_full"))
             return -1
         saved = self._dj_deck()
-        keys = ("scale", "key", "sound", "bpm", "noise", "tones", "gates")
+        keys = ("scale", "key", "sound", "bpm", "noise", "tones", "gates", "volumes")
         backup = {k: saved[k] for k in keys}
         clean = dj_core.sanitize_entries([entry])[0]
         try:                                       # 一時的にエントリの設定で組み立てる
             saved.update({k: entry[k] for k in ("scale", "key", "sound", "bpm", "noise")})
             saved["tones"] = list(clean["tones"])
             saved["gates"] = list(clean["gates"])
+            saved["volumes"] = list(clean["volumes"])
             project = self._dj_project_for(entry["seed"])
         finally:
             saved.update(backup)
@@ -1878,6 +1896,17 @@ class PicoSeqApp:
         self._dj_changed(deck)
         self.set_status(t("st_dj_part_gate", deck="AB"[deck],
                           part=i18n.part_name(wave), gate=gate))
+
+    def dj_set_part_volume(self, deck, wave, volume):
+        """パートの音量 (0..100) を変える。デッキごとにミックスのバランスを作れる。"""
+        wave = max(0, min(PART_COUNT - 1, int(wave)))
+        volume = max(0, min(100, int(volume)))
+        if volume == self.dj_decks[deck]["volumes"][wave]:
+            return
+        self.dj_decks[deck]["volumes"][wave] = volume
+        self._dj_changed(deck)
+        self.set_status(t("st_dj_part_volume", deck="AB"[deck],
+                          part=i18n.part_name(wave), volume=volume))
 
     def dj_set_filter(self, deck, level):
         level = max(0, min(100, int(level)))
@@ -2590,6 +2619,13 @@ class PicoSeqApp:
             self.dj_set_part_gate(0, WAVE_PULSE, 80)
             self.dj_set_part_tone(0, _WS, 50)
             self.dj_set_part_gate(0, _WS, 80)
+            # 音量もパートごとに独立して調整でき、レンダリングにも反映される
+            self.dj_set_part_volume(0, WAVE_PULSE, 40)
+            self.dj_set_part_volume(0, _WS, 100)
+            assert self.dj_decks[0]["volumes"][WAVE_PULSE] == 40
+            assert self.dj_decks[0]["volumes"][_WS] == 100
+            assert self.project.parts[WAVE_PULSE][0].volume == 40
+            self.dj_set_part_volume(0, WAVE_PULSE, 100)
 
             # 履歴: 流したフレーズが新しい順に積まれ、同じものは繰り上がる
             self.dj_history = []
@@ -2630,16 +2666,17 @@ class PicoSeqApp:
                 restore["dj_favorites"] = saved_favorites
                 storage.save_settings(restore)
 
-            # 呼び戻し: エントリの設定 (パート音色・長さ含む) がデッキへ入り、固定される
+            # 呼び戻し: エントリの設定 (パート音色・長さ・音量含む) がデッキへ入り、固定される
             recall = dj_core.make_entry("battle", 9, 96, "clear32", 1, 4242,
                                         tones=(20, 30, 40, 50), gates=(15, 25, 35, 45),
-                                        deck=0)
+                                        volumes=(60, 70, 80, 90), deck=0)
             self.dj_recall(recall, 1)
             assert self.dj_decks[1]["scale"] == "battle"
             assert self.dj_decks[1]["key"] == 9 and self.dj_decks[1]["bpm"] == 96
             assert self.dj_decks[1]["seed"] == 4242 and self.dj_decks[1]["hold"]
             assert self.dj_decks[1]["tones"] == [20, 30, 40, 50]   # 音色も復元される
             assert self.dj_decks[1]["gates"] == [15, 25, 35, 45]   # 長さも復元される
+            assert self.dj_decks[1]["volumes"] == [60, 70, 80, 90]  # 音量も復元される
             self.dj_set_hold(1, False)
 
             # 💾 残す: 空きスロットへパターンとして保存 (盤面は変えない)
@@ -2669,8 +2706,17 @@ class PicoSeqApp:
             self.select_part(2)
             self._on_tone_change("70")
             self._on_gate_change("40")
+            self._on_volume_change("55")
             assert self.project.parts[2][0].tone == 70
             assert self.project.parts[2][0].gate == 40
+            assert self.project.parts[2][0].volume == 55       # パートごとの音量
+            # 音量 100 はレンダリング無変化 (完全な no-op)、下げると音が変わる
+            from ..core.renderer import render_phrase as _rp, clear_cache as _cc
+            _cc(); full = _rp(actions.set_part_volume(self.project, 2, 100))
+            _cc(); unit = _rp(actions.set_part_volume(self.project, 2, 100))
+            _cc(); down = _rp(actions.set_part_volume(self.project, 2, 30))
+            assert full == unit and down != full               # 100=無変化 / 下げると変わる
+            self._on_volume_change("100")
 
             # マルチレイヤー: 追加・選択・別設定・自動生成・削除
             self.select_part(0)
@@ -3079,6 +3125,12 @@ class PicoSeqApp:
             return
         self.tweak(actions.set_part_gate(self.project, self.part, int(float(value)),
                                          layer=self.layer))
+
+    def _on_volume_change(self, value):
+        if self._syncing:
+            return
+        self.tweak(actions.set_part_volume(self.project, self.part, int(float(value)),
+                                           layer=self.layer))
 
 
 def _load_demo(app):

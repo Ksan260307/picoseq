@@ -131,7 +131,7 @@ class EntryTest(unittest.TestCase):
         for field, value in (("scale", "battle"), ("key", 3), ("bpm", 90),
                              ("sound", "warm16"), ("noise", 2),
                              ("tones", (1, 2, 3, 4)), ("gates", (11, 22, 33, 44)),
-                             ("seed", 8)):
+                             ("volumes", (9, 8, 7, 6)), ("seed", 8)):
             with self.subTest(field=field):
                 other = _entry(seed=8) if field == "seed" else _entry(seed=7, **{field: value})
                 self.assertNotEqual(dj.entry_id(base), dj.entry_id(other))
