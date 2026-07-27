@@ -195,6 +195,82 @@ def default_progression(count: int) -> tuple:
     return (0, min(3, count - 1), min(1, count - 1), min(4, count - 1))
 
 
+# ---- 音階の性格分類 ----
+# 曲調ごとに似合うリズム/ベースを選ぶために、音階を「性格グループ」へ分ける。
+# 65 曲調ぶんの対応表を手で持つのではなく、**音の並びから導出**する。
+# こうすると新しい音階を足しても表を触らずに済み、判定基準も一箇所に集まる。
+
+FAMILY_BRIGHT = "bright"            # 明るい・ポップ
+FAMILY_OPEN = "open"                # のどか・開放
+FAMILY_LYRIC = "lyric"              # 切ない・叙情
+FAMILY_SORROW = "sorrow"            # 哀愁・緊張
+FAMILY_EXOTIC = "exotic"            # エキゾチック (アラビア/ペルシャ系)
+FAMILY_BLUES = "blues"              # ブルース
+FAMILY_JAZZ = "jazz"                # ジャズ・緊張 (8 音)
+FAMILY_DREAM = "dream"              # 幻想・浮遊 (対称音階)
+FAMILY_FOLK5 = "folk5"              # 五音・民族 (和/都節など)
+FAMILY_SUNNY5 = "sunny5"            # 五音・陽 (ペンタ/琉球など)
+FAMILY_FIERCE = "fierce"            # 激しい
+
+SCALE_FAMILIES = (
+    FAMILY_BRIGHT, FAMILY_OPEN, FAMILY_LYRIC, FAMILY_SORROW, FAMILY_EXOTIC,
+    FAMILY_BLUES, FAMILY_JAZZ, FAMILY_DREAM, FAMILY_FOLK5, FAMILY_SUNNY5,
+    FAMILY_FIERCE,
+)
+
+# 音の並びだけでは意図と合わない音階だけ、明示的に上書きする。
+_FAMILY_OVERRIDES = {
+    "battle": FAMILY_FIERCE,
+    "japanese": FAMILY_FOLK5,
+    "blues": FAMILY_BLUES,
+    "major_blues": FAMILY_BLUES,
+}
+
+
+def scale_family(scale_id: str, custom=None) -> str:
+    """音階の性格グループ。音程の並びから導出する (フォト音階も判定できる)。"""
+    if scale_id in _FAMILY_OVERRIDES:
+        return _FAMILY_OVERRIDES[scale_id]
+    if scale_id == PHOTO_SCALE:
+        intervals = tuple(custom) if custom else (0, 4, 7)
+    else:
+        intervals = SCALES[scale_id]["intervals"]
+    return _family_of(intervals)
+
+
+def _family_of(intervals) -> str:
+    """音程の集合から性格を決める。判定の順番が優先順位になる。"""
+    iv = set(intervals)
+    n = len(iv)
+    flat2 = 1 in iv          # ♭2 — 緊張・エキゾチックの目印
+    minor3 = 3 in iv
+    major3 = 4 in iv
+    flat5 = 6 in iv          # 減 5 度 — ブルース/減音階
+    flat7 = 10 in iv
+    major7 = 11 in iv
+
+    if n <= 4:
+        return FAMILY_SUNNY5
+    if n == 5:
+        # 5 音は「半音を含むか」で和・都節系と陽性ペンタに分かれる
+        return FAMILY_FOLK5 if (flat2 or 8 in iv) else FAMILY_SUNNY5
+    if n >= 8:
+        return FAMILY_JAZZ
+    if flat2 and major3:
+        return FAMILY_EXOTIC
+    if flat5 and flat7 and minor3:
+        return FAMILY_BLUES
+    if n == 6:
+        return FAMILY_DREAM
+    if flat2:
+        return FAMILY_SORROW
+    if major3 and major7:
+        return FAMILY_BRIGHT
+    if major3:
+        return FAMILY_OPEN
+    return FAMILY_LYRIC
+
+
 def progression_choices(scale_id: str, custom=None) -> tuple:
     """その音階で使えるコード進行の候補一覧。自動作成が 1 つ選ぶ。"""
     if scale_id == PHOTO_SCALE:

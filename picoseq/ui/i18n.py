@@ -175,7 +175,9 @@ STRINGS = {
     "btn_arrange": {"ja": "🎸 伴奏づけ", "en": "🎸 Add backing"},
     # パート・スライダーバー
     "lbl_part": {"ja": "パート", "en": "Part"},
-    "lbl_tone": {"ja": "音色", "en": "Tone"},
+    # パートごとのつまみ。ヘッダーの「音色」(音色セット) と紛れないよう別語にする。
+    # パルス波なら細い⇄太い、他の波形なら暗い⇄明るい — どちらも指せる語として「質感」。
+    "lbl_tone": {"ja": "質感", "en": "Tone"},
     "lbl_gate": {"ja": "長さ", "en": "Length"},
     "lbl_volume": {"ja": "音量", "en": "Volume"},
     "btn_reverse": {"ja": "🔄 反転", "en": "🔄 Reverse"},
@@ -442,6 +444,9 @@ STRINGS = {
     "dj_noise": {"ja": "ノイズ", "en": "Noise"},
     "dj_filter": {"ja": "フィルター", "en": "Filter"},
     "dj_hold": {"ja": "ループ固定", "en": "Hold loop"},
+    # 自動進行の可視化 (固定が効いていること・次までの小節数が見える)
+    "dj_held": {"ja": "🔁 このフレーズを固定中", "en": "🔁 Holding this phrase"},
+    "dj_next_in": {"ja": "次のフレーズまで {bars} 小節", "en": "Next phrase in {bars} bars"},
     "dj_kill": {"ja": "KILL", "en": "KILL"},
     "st_dj_rolled": {"ja": "デッキ {deck} を シード {seed} で生成。", "en": "Rolled deck {deck} with seed {seed}."},
     "st_dj_mood": {"ja": "デッキ {deck} の曲調を「{mood}」に。", "en": "Deck {deck} mood → \"{mood}\"."},

@@ -7,8 +7,9 @@ import unittest
 
 from picoseq.core.constants import PITCH_MAX, PITCH_MIN, SOUND_SETS
 from picoseq.ui import theme
-from picoseq.ui.app import DJ_ADVANCE_LOOPS, PicoSeqApp
+from picoseq.ui.app import PicoSeqApp
 from picoseq.ui.dj_view import angle_diff
+from picoseq.ui.tuning import DJ_ADVANCE_LOOPS
 
 _swap = PicoSeqApp._dj_should_swap
 _pitch = PicoSeqApp.dj_scratch_pitch

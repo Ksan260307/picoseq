@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "picoseq"
+version = "2.0.0"
+description = "PicoSeq — ドット絵風チップチューンを作って鳴らす決定論シーケンサー"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+# 本体は Python 標準ライブラリ (tkinter / ctypes / wave など) だけで動く。
+# numpy と pillow は「あれば速く／使える」任意依存で、無くても純 Python で動作する。
+dependencies = []
+
+[project.optional-dependencies]
+# 高速レンダリング (numpy 経路。無くても純 Python とビット等価)
+fast = ["numpy>=1.21"]
+# 写真から音階を作る機能
+photo = ["pillow>=9.0"]
+# exe ビルド
+build = ["pyinstaller>=6.0"]
+# 上記まとめて
+all = ["numpy>=1.21", "pillow>=9.0", "pyinstaller>=6.0"]
+
+[project.scripts]
+picoseq = "main:main"
+
+[tool.setuptools]
+packages = ["picoseq", "picoseq.core", "picoseq.ui", "picoseq.vision"]
+
+[tool.setuptools.package-dir]
+"" = "."

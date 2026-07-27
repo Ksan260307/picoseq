@@ -191,5 +191,46 @@ class TestRecording(unittest.TestCase):
         self.assertEqual(len(player.stop_record()), 8)
 
 
+class TestBackendSelection(unittest.TestCase):
+    """バックエンド抽象化 — どの環境でも create_stream が有効な再生器を返す。"""
+
+    def test_factory_returns_core_compatible(self):
+        from picoseq.ui import stream
+        s = stream.create_stream(rate=44100, frames=4, buffers=2)
+        # どのバックエンドでも共通 API を備える
+        for name in ("set_loop", "replace_loop", "set_next", "play_oneshot",
+                     "stop", "start_record", "stop_record", "open", "close"):
+            self.assertTrue(hasattr(s, name), name)
+        self.assertIsInstance(s, stream._StreamCore)
+
+    def test_core_next_chunk_works_without_device(self):
+        """基底 (デバイス無し) でもミックスは成立する。"""
+        from picoseq.ui import stream
+        core = stream._StreamCore(rate=44100, frames=4, buffers=2)
+        self.assertFalse(core.open())        # デバイスを持たない
+        core.set_loop(_pcm([5] * 4))
+        self.assertEqual(_samples(core._next_chunk()), [5, 5, 5, 5])
+
+    def test_winmm_and_sounddevice_share_core(self):
+        from picoseq.ui import stream
+        self.assertTrue(issubclass(stream.WinmmStream, stream._StreamCore))
+        self.assertTrue(issubclass(stream.SounddeviceStream, stream._StreamCore))
+        self.assertIs(stream.StreamPlayer, stream.WinmmStream)  # 後方互換
+
+    def test_backends_reuse_tested_mix(self):
+        """全バックエンドが同じ _next_chunk (テスト済みミックス) を使う。"""
+        from picoseq.ui import stream
+        self.assertIs(stream.WinmmStream._next_chunk, stream._StreamCore._next_chunk)
+        self.assertIs(stream.SounddeviceStream._next_chunk,
+                      stream._StreamCore._next_chunk)
+
+    def test_unopened_backend_falls_back(self):
+        """開けないバックエンドは open() が False (呼び出し側はファイル再生へ)。"""
+        from picoseq.ui import stream
+        core = stream._StreamCore()
+        self.assertFalse(core.open())
+        self.assertFalse(core.playing)
+
+
 if __name__ == "__main__":
     unittest.main()

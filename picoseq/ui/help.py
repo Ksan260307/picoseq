@@ -12,7 +12,8 @@ SECTIONS_JA = [
         ("試聴する", "左端の鍵盤をクリックすると、その高さの音が鳴ります。"),
         ("パート切替", "「パート」ボタン、またはキー 1〜4。メロディ・ベース・リズム・サブの4層。"),
         ("レイヤー", "各パートは「＋ 追加」で最大8層まで重ねられます。層ごとに音色・音を分けられ、自動作成も各層に音を入れます。"),
-        ("音色・長さ", "選んだパート (層) ごとに、音の明るさ (音色) と長さを調整できます。"),
+        ("質感・長さ・音量", "選んだパート (層) ごとに、音の質感 (明るさ・太さ)・長さ・音量を調整できます。"
+                       "ヘッダーの「音色」は曲全体の音色セットで、こちらとは別物です。"),
         ("移調・反転", "🔼🔽 (または Ctrl+↑↓) で 1 オクターブ上げ下げ。🔄 でフレーズを時間反転。"),
         ("パート消去", "パートのボタンを右クリックすると、そのパートの音だけを消せます。"),
     ]),
@@ -20,6 +21,17 @@ SECTIONS_JA = [
         ("自動作成", "押すたびに新しい「シード値」で1フレーズを生成します。番号は上の欄に表示され、"
                     "その番号を入力して Enter を押せばいつでも同じ曲を再現できます。"
                     "作成後は使われたコード進行 (例: Am→F→C→G) が画面下に出ます。"),
+        ("演奏スタイル", "シード値ごとにパートの演奏型が変わります。"
+                    "リズム 208 種 (骨格 13 × 密度 4 × アクセント 4)、"
+                    "ベース 288 種 (動き 8 × 刻み 3 × 変化 6 × 音域 2)、"
+                    "伴奏 100 種 (取り方 5 × 置き方 4 × 長さ 5)、"
+                    "メロディのリズム 10 種を組み合わせます。"),
+        ("メロディの作り", "同じ音が続く回数に上限があり、どんなに疎なリズム型でも最低音数を保証します。"
+                        "拍の頭はコードの音を守りつつ、裏拍には経過音を通すので、"
+                        "安全すぎない歌になります。"),
+        ("曲調に合う演奏", "曲調の性格に合った演奏が 4 パートすべてで出やすくなります "
+                      "(和風なら太鼓と薄い伴奏、ボス戦なら倍テンと 16 分ベース、幻想ならボサとパッド)。"
+                      "絞り込みではなく重み付けなので、どの曲調でも全部の型が出る余地があります。"),
         ("🎲 サプライズ", "曲調・音色・テンポ・シード値に加え、各パートの音色 (パルス幅など) と長さも"
                         "まるごとランダムに選んで一発生成します。65 種類の曲調から、質感まで思いがけない"
                         "組み合わせに出会えます。"),
@@ -38,7 +50,9 @@ SECTIONS_JA = [
     ("🎧 DJ モード", [
         ("回して流す", "▶ で開始すると、8 小節ごとに次のフレーズを自動生成して継ぎ目なく流し続けます"
                      "(次ループを裏で先に用意し、ループの境目で滑らかに差し替え)。"),
-        ("🔁 ループ固定", "チェックを入れると自動で進まず、現在のフレーズをループし続けます。"),
+        ("🔁 ループ固定", "チェックを入れると自動で進まず、現在のフレーズをループし続けます。"
+                       "固定中はつまみを触ってもフレーズは変わりません (音作りだけが変わります)。"
+                       "中央の「次のフレーズまで N 小節」表示で進行のタイミングが分かります。"),
         ("スクラッチ", "ディスクをドラッグ (マウス) するとスクラッチできます。掴むと止まり、離すと再開。"
                     "動かさずにクリック (タップ) すると、そのデッキで新しいフレーズを生成します。"),
         ("クロスフェーダー", "デッキ A ⇄ B を切り替え。別の曲調のデッキを仕込んで展開できます。"),
@@ -47,9 +61,9 @@ SECTIONS_JA = [
                           "曲調・キー・音色を変えてもフレーズの骨格は保たれます (作り直すのは 🎲 生成 のみ)。"),
         ("SYNC", "もう一方のデッキへテンポとキーを合わせます。曲調・音色はそのままなので、"
                  "別の曲調のまま拍とキーだけ揃えて重ねられます。"),
-        ("音色 / 長さ / 音量 (パートごと)", "「パート」で メロディ/ベース/リズム/サブ を選び、そのパートの音色・長さ・音量を調整します。"
-                              "音色はメロディならパルス波のデューティ比 (細い電子音⇄太い矩形波)、長さはゲート (歯切れ⇄伸び)、音量はミックスのバランス。"
-                              "音符は変えず音作りだけが変わります。"),
+        ("質感 / 長さ / 音量 (パートごと)", "「パート」で メロディ/ベース/リズム/サブ を選び、そのパートの質感・長さ・音量を調整します。"
+                              "質感はメロディならパルス波のデューティ比 (細い電子音⇄太い矩形波)、長さはゲート (歯切れ⇄伸び)、音量はミックスのバランス。"
+                              "ヘッダーの「音色」(音色セット) とは別のつまみです。音符は変えず音作りだけが変わります。"),
         ("ノイズ / フィルター / KILL", "ノイズや掃引フィルターで盛り上げ、KILL で各パートを即消音。タップでテンポ合わせ。"
                                   "つまみはすべてデッキごとに独立し、その場で音に反映されます。"),
         ("🕘 履歴 / ★ お気に入り", "流したフレーズが新しい順に並びます。行の →A / →B で任意のデッキへ呼び戻し、"
@@ -99,6 +113,9 @@ SECTIONS_EN = [
         ("Auto", "Each press generates one phrase from a new \"seed\". The number shows in the field above; "
                  "type it and press Enter to reproduce the exact same music anytime. "
                  "After generating, the chord progression used (e.g. Am→F→C→G) appears at the bottom."),
+        ("How melodies are written", "Repeats of the same pitch are capped and a minimum note count is "
+                                    "guaranteed even for the sparsest rhythms. Beat heads stay on chord "
+                                    "tones while off-beats let passing tones through, so it never sounds too safe."),
         ("🎲 Surprise", "Randomly picks mood, sound, tempo and seed — plus each part's tone (pulse width, etc.) "
                        "and length — all at once. Discover unexpected textures from 65 moods."),
         ("🎤 From humming", "Sing into the mic (or open a recorded WAV) and it reads your pitch "
@@ -116,7 +133,9 @@ SECTIONS_EN = [
     ("🎧 DJ mode", [
         ("Spin & flow", "Press ▶ and it auto-generates a new phrase every 8 bars and flows on with no gap "
                         "(the next loop is pre-rendered and swapped in on the downbeat)."),
-        ("🔁 Hold", "Tick it to stop advancing and loop the current phrase instead."),
+        ("🔁 Hold", "Tick it to stop advancing and loop the current phrase instead. While held, "
+                    "turning a knob only changes the sound — never the phrase. The centre shows "
+                    "\"Next phrase in N bars\" so you can see the advance coming."),
         ("Scratch", "Drag a disc (with the mouse) to scratch — grabbing pauses, releasing resumes. "
                     "Click without moving (a tap) to generate a fresh phrase on that deck."),
         ("Crossfader", "Switch between decks A ⇄ B — cue up a different-mood deck, then bring it in."),

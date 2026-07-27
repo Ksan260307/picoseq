@@ -12,6 +12,7 @@ from tkinter import ttk
 
 from ..core import dj as dj_core
 from ..core.constants import BPM_MAX, BPM_MIN
+from .flowbar import FlowBar
 from ..core.music import KEY_NAMES, SCALE_IDS, SCALES
 from . import i18n, theme
 from .i18n import t
@@ -51,14 +52,15 @@ class DJView:
         self._syncing = False        # 同期中はコールバックを無視する
 
         self.frame = tk.Frame(parent, bg=theme.BG)
-        self.console = tk.Frame(self.frame, bg=theme.BG)
-        # 左上寄せ。中央寄せにすると、ウィンドウより広い枠の中で中央になり
-        # デッキ B が画面外へ押し出されてしまう。
-        self.console.pack(side="top", anchor="w", padx=6, pady=(2, 0))
+        # 幅が足りなければデッキ B が下へ折り返す (狭い画面で画面外に消えない)。
+        # 素の pack だと中央寄せ・見切れのどちらかになり、B が操作できなくなる。
+        self.console = FlowBar(self.frame, bg=theme.BG, gap=10)
+        self.console.pack(side="top", fill="x", padx=6, pady=(2, 0))
 
         self._build_deck("a", strip_side="right")
         self._build_mixer()
         self._build_deck("b", strip_side="left")
+        self.console.done()
         self._build_log()
 
     # ---- デッキ (ターンテーブル + チャンネルストリップ) ----
@@ -67,7 +69,7 @@ class DJView:
         color = _deck_color(key)
         deck = DECK_KEYS.index(key)
         wrap = tk.Frame(self.console, bg=theme.BG)
-        wrap.pack(side="left", anchor="n", padx=10, pady=4)
+        self.console.add(wrap)
 
         tk.Label(wrap, text=t("dj_deck", deck=key.upper()), font=theme.FONT_BOLD,
                  bg=theme.BG, fg=color).pack(pady=(0, 2))
@@ -259,11 +261,17 @@ class DJView:
     def _build_mixer(self):
         mix = tk.Frame(self.console, bg=theme.PANEL, padx=12, pady=10,
                        highlightbackground=theme.PANEL_EDGE, highlightthickness=1)
-        mix.pack(side="left", anchor="n", padx=8, pady=4)
+        self.console.add(mix)
 
         self.play_btn = self.app._button(mix, t("dj_play"), self.app.dj_play, accent=True)
         self.play_btn.configure(font=theme.FONT_BOLD, padx=18, pady=5)
-        self.play_btn.pack(pady=(0, 12))
+        self.play_btn.pack(pady=(0, 2))
+
+        # 次のフレーズまでの小節数 (ループ固定中はその表示)。
+        # 自動進行が動いていること・固定が効いていることを目で確かめられるようにする。
+        self.next_var = tk.StringVar(value="")
+        tk.Label(mix, textvariable=self.next_var, font=theme.FONT_SMALL,
+                 bg=theme.PANEL, fg=theme.PLAYHEAD).pack(pady=(0, 8))
 
         tk.Label(mix, text=t("dj_crossfade"), font=theme.FONT_SMALL,
                  bg=theme.PANEL, fg=theme.TEXT_DIM).pack()
@@ -572,6 +580,11 @@ class DJView:
 
     def set_play(self, playing):
         self.play_btn.configure(text=t("dj_stop") if playing else t("dj_play"))
+
+    def sync_next(self, text):
+        """次のフレーズまでの案内 (小節数 / 固定中) を表示する。"""
+        if hasattr(self, "next_var"):
+            self.next_var.set(text)
 
     def set_recording(self, recording):
         """録音ボタンの見た目を切り替える (録音中は赤く「■ 停止」)。"""

@@ -24,10 +24,31 @@ Place notes on a grid to build a song — or start from a photo or your own humm
   Japanese scales (in-sen, ryukyu, …) / blues, jazz, whole-tone, diminished / world scales
   (Persian, Arabic, Hungarian, …) and more (plus photo-derived scales)
 - **✨ Auto-compose** — one-click composition. Keep the "seed value" to recreate the exact same tune anytime.
-  Chord progressions (500–4,000 per mood, **~120,000 total**) × 9 bass × 7 backing × 9 drum × 6 melody-rhythm ×
-  4 development styles (**13,000+ playing-style combos alone**) combine, so every seed sounds different.
-  Progressions are generated from functional harmony (tonic / subdominant / dominant) with substitute chords;
-  the one used (e.g. Am→F→C→G) is shown after generating
+  Chord progressions (500–4,000 per mood, **~120,000 total**) × **288 bass** × **100 backing** ×
+  **208 drum** × 10 melody-rhythm × 6 development styles (**350,000,000+ playing-style combos alone**)
+  combine, so every seed sounds different. Progressions are generated from functional harmony
+  (tonic / subdominant / dominant) with substitute chords; the one used (e.g. Am→F→C→G) is shown after generating
+- **🥁 208 drums / 288 bass / 100 backing patterns** — not hand-written one by one, but built from the
+  product of musically meaningful axes (the same idea as the chord progressions).
+  - Drums = **13 skeletons** (rock / eighths / triplet / backbeat / half-time / offbeat / clave /
+    bossa nova / amen / gallop / tribal / drum'n'bass / stutter) × **4 densities** (airy ⇄ packed)
+    × **4 accent schemes**
+  - Bass = **8 motions** (pedal / root-fifth / walking / arpeggio / octave / chromatic / run / third)
+    × **3 subdivisions** (half-bar / quarter / eighth) × **6 variations** (straight / syncopated /
+    dotted / grace / two-bar / build-up) × **2 registers** (deep foundation / an octave up)
+  - Backing = **5 voicings** (root / third / fifth / arpeggio up & down) × **4 placements**
+    (beats / offbeats / eighths / pad) × **5 lengths** (short stabs ⇄ long sustain)
+  - Densities span very sparse to packed, so you can build and drop energy
+- **🎵 Melodies are written to be singable** — quality, not just quantity. Repeats of the same
+  pitch are capped (no melody that gets stuck on one note), a minimum note count is guaranteed
+  even for the sparsest rhythm types (never a phrase with no melody), and while beat heads stay
+  on chord tones, off-beats let **passing tones** through (so it never sounds too safe)
+- **🎯 The whole arrangement matches the mood** — the scale's own interval content decides its character
+  (11 families: bright / lyrical / exotic / blues / dreamy / pentatonic-folk / fierce …) and the styles
+  that suit it become **more likely across all four parts** (drums, bass, backing and melody).
+  e.g. Japanese → taiko feels with sparse backing, Boss battle → double-time & drum'n'bass with
+  16th-note bass, dreamy → bossa with pads. Nothing is forbidden, so **any pattern can still appear
+  in any mood** — character without losing surprise
 - **🎲 Surprise me** — randomizes mood, sound set, **tempo** and seed, **plus each part's tone (pulse width,
   etc.) and length**, for a one-click reveal — so even the texture is an unexpected combination from all 65 moods
 - **🎼 Auto-song** — generates a whole Intro → A → B → Outro song structure in one click
@@ -178,11 +199,14 @@ The imported scale stays available in the mood selector as *📷 Photo Scale*.
     fat square**), **Length** (gate — shorter is punchier, longer sustains) and **Volume**
     (mix balance). The notes stay the same; only the sound design changes
   - **Filter**: sweep a low-pass (dark ⇄ open)
-  - **Hold loop**: stop advancing and loop that deck's phrase
+  - **Hold loop**: stop advancing and loop that deck's phrase. Turning a knob no longer
+    swaps the phrase — only its sound changes
   - **KILL**: instantly mute a part (melody / bass / rhythm / sub)
   - **SYNC**: match **tempo and key** to the other deck. Mood and sound are left alone,
     so you can layer two different moods that share a beat and a key
 - Control changes apply **immediately** (no waiting for the loop boundary); **Tap** sets the tempo
+- The centre shows **"Next phrase in N bars"** so you can see the auto-advance coming, and
+  switches to **"🔁 Holding this phrase"** while Hold loop is on
 - **🕘 History**: every phrase you played, newest first. From a row you can
   **recall it onto either deck (→A / →B)**, **star it**, or **save it as a pattern (💾)**.
   **Control tweaks are logged too** (committed as one row once you settle), so you can always

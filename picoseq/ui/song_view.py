@@ -31,7 +31,9 @@ class SongView:
             bg=theme.GRID_BG, highlightthickness=1,
             highlightbackground=theme.PANEL_EDGE,
         )
-        self.canvas.pack()
+        # 左寄せ。素の pack() だと tkinter が盤面を中央へ寄せてしまい、
+        # 左に大きな死んだ余白ができて「壊れている」ように見える。
+        self.canvas.pack(side="left", anchor="nw")
         self.canvas.bind("<Button-1>", self._on_press)
         self.canvas.bind("<Button-3>", self._on_right_press)
         self.canvas.bind("<Motion>", self._on_motion)
