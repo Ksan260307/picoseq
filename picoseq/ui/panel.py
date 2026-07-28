@@ -13,6 +13,7 @@ from .i18n import t
 
 class DockPanel:
     def __init__(self, paned, title, app, minsize=70, height=None, stretch="always"):
+        """見出し付きのパネルを作る (切り離しボタン込み)。"""
         self.paned = paned
         self.app = app
         self.title = title
@@ -49,8 +50,18 @@ class DockPanel:
         else:
             self.detach()
 
+    def _pane_names(self) -> list:
+        """今ドックされているペインの名前 (文字列) の並び。
+
+        `panes()` が返すのは Tcl_Obj で、**文字列と == が成り立たない**。
+        素の `in` / `index` で探すと必ず見つからず、戻す位置を取りこぼして
+        パネルの順序が入れ替わってしまう。必ず str へ直してから比べる。
+        """
+        return [str(p) for p in self.paned.panes()]
+
     def detach(self):
-        panes = self.paned.panes()
+        """パネルを独立ウィンドウへ切り離す (戻す位置を覚えておく)。"""
+        panes = self._pane_names()
         path = str(self.container)
         if path in panes:
             idx = panes.index(path)
@@ -68,11 +79,12 @@ class DockPanel:
         self.detached = True
 
     def redock(self):
+        """切り離したパネルを元の位置へ戻す。"""
         if not self.detached:
             return
         root = self.app.root
         root.tk.call("wm", "forget", self.container)
-        panes = self.paned.panes()
+        panes = self._pane_names()
         if self._after and str(self._after) in panes:
             self.paned.add(self.container, before=self._after,
                            minsize=self.minsize, stretch=self.stretch)

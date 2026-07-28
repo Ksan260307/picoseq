@@ -6,6 +6,12 @@
 
 レンダリングは重いので、レンダリング系のテストは 1 シードに絞り、
 2 回目はキャッシュ経由 (= キャッシュ経路の一致も同時に検査) にして速さを保つ。
+
+さらに**合成は低いサンプリング周波数で行う** (TEST_RATE)。ここで見たいのは
+「同じ入力なら同じ出力」「足す順番によらない」という性質で、どちらも
+サンプル数に依存しない。44.1kHz だと 65 曲調 × 2 種のレンダリングで
+1 分以上かかり、開発中に回しづらくなる (音そのものの回帰は
+test_renderer.py のゴールデン CRC が 44.1kHz で見張っている)。
 """
 
 import random
@@ -33,6 +39,7 @@ from picoseq.core.schedule import phrase_ticks
 
 COMPOSE_SEEDS = (1, 42, 999)
 RENDER_SEED = 42
+TEST_RATE = 11025   # 性質の検査には十分。44.1kHz の 1/4 の時間で回る
 
 
 def _project(scale, seed, key=0):
@@ -82,8 +89,8 @@ def _render_test(scale):
     def test(self):
         p = _project(scale, RENDER_SEED)
         clear_cache()
-        a = render_phrase(p)          # 未キャッシュ
-        b = render_phrase(p)          # キャッシュ経由
+        a = render_phrase(p, rate=TEST_RATE)   # 未キャッシュ
+        b = render_phrase(p, rate=TEST_RATE)   # キャッシュ経由
         self.assertEqual(zlib.crc32(a), zlib.crc32(b))
         self.assertTrue(a, "無音になっている")
     return test
@@ -106,11 +113,11 @@ def _order_test(scale):
         events = phrase_events(p)
         tk = phrase_ticks(p)
         clear_cache()
-        base = list(render_events(events, p.bpm, p.parts, tk, SAMPLE_RATE,
+        base = list(render_events(events, p.bpm, p.parts, tk, TEST_RATE,
                                   sound=p.sound))
         shuffled = events[:]
         random.Random(RENDER_SEED).shuffle(shuffled)
-        other = list(render_events(shuffled, p.bpm, p.parts, tk, SAMPLE_RATE,
+        other = list(render_events(shuffled, p.bpm, p.parts, tk, TEST_RATE,
                                    sound=p.sound))
         self.assertEqual(base, other, "評価順序で結果が変わった (順序独立性の破れ)")
     return test
@@ -157,8 +164,8 @@ def _sound_test(sound):
     def test(self):
         p = actions.set_sound(_project("major", RENDER_SEED), sound)
         clear_cache()
-        a = render_phrase(p)
-        b = render_phrase(p)
+        a = render_phrase(p, rate=TEST_RATE)
+        b = render_phrase(p, rate=TEST_RATE)
         self.assertEqual(a, b)
         self.assertTrue(a)
     return test

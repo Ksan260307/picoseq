@@ -79,6 +79,7 @@ class DJMixin:
                 "filter": 100, "hold": False, "muted": set()}
 
     def _dj_scale_label(self, scale_id) -> str:
+        """曲調 ID を表示名にする (DJ のセレクタ用)。"""
         from ..core.music import SCALES
         if scale_id not in SCALES:
             scale_id = "major"
@@ -105,6 +106,7 @@ class DJMixin:
         self._refresh_dj_log()
 
     def _update_dj_decks(self):
+        """2 つのデッキの表示を今の設定に合わせる。"""
         for i, key in enumerate(("a", "b")):
             deck = self.dj_decks[i]
             self.dj_view.sync_deck(key, deck, self._dj_scale_label(deck["scale"]),
@@ -194,6 +196,7 @@ class DJMixin:
         self._update_dj_decks()
 
     def _dj_schedule_render(self):
+        """次ループの用意をまとめて予約する (連打を 1 回にする)。"""
         if self.silent or self.play_mode != "phrase":
             return
         if self._dj_render_token is not None:
@@ -298,6 +301,7 @@ class DJMixin:
         return (not hold) and loop_count >= advance_loops
 
     def dj_play(self):
+        """DJ の再生 / 停止を切り替える。"""
         if self.play_mode == "phrase":
             self.stop_playback()
             return
@@ -314,6 +318,7 @@ class DJMixin:
         self._dj_record_history()
 
     def dj_roll(self, deck):
+        """そのデッキで新しいフレーズを引く (🎲)。"""
         seed = random.randint(SEED_MIN, SEED_MAX)
         self.dj_decks[deck]["seed"] = seed
         if deck == self.dj_active:
@@ -487,6 +492,7 @@ class DJMixin:
         self._dj_save_recording(pcm)
 
     def _dj_save_recording(self, pcm):
+        """録音したミックスを WAV として保存する。"""
         if not pcm:
             self.set_status(t("st_dj_rec_empty"))
             return
@@ -558,6 +564,7 @@ class DJMixin:
         return slot
 
     def dj_set_crossfade(self, value):
+        """クロスフェーダー — どちらのデッキを鳴らすか。"""
         new_active = 0 if value < 50 else 1
         if new_active == self.dj_active:
             return
@@ -571,11 +578,13 @@ class DJMixin:
         self.set_status(t("st_dj_switch", deck="AB"[new_active]))
 
     def dj_set_hold(self, deck, on):
+        """ループ固定の切り替え (自動で次へ進まなくする)。"""
         self.dj_decks[deck]["hold"] = bool(on)
         self._update_dj_decks()
         self.set_status(t("st_dj_hold_on") if on else t("st_dj_hold_off"))
 
     def dj_set_noise(self, deck, level):
+        """ノイズ量 — 刻みの細かさを変える。"""
         level = max(0, min(4, int(level)))
         if level == self.dj_decks[deck]["noise"]:
             return
@@ -621,6 +630,7 @@ class DJMixin:
                           part=i18n.part_name(wave), volume=volume))
 
     def dj_set_filter(self, deck, level):
+        """フィルターの開き具合 (暗い ⇄ 開放)。"""
         level = max(0, min(100, int(level)))
         if level == self.dj_decks[deck]["filter"]:
             return
@@ -628,6 +638,7 @@ class DJMixin:
         self._dj_changed(deck)
 
     def dj_set_tempo(self, deck, bpm):
+        """そのデッキのテンポを変える。"""
         bpm = max(BPM_MIN, min(BPM_MAX, int(bpm)))
         if bpm == self.dj_decks[deck]["bpm"]:
             return
@@ -657,6 +668,7 @@ class DJMixin:
         return max(BPM_MIN, min(BPM_MAX, int(round(60.0 / avg))))
 
     def dj_kill(self, deck, part):
+        """パートを即消音 / 復帰する。"""
         muted = self.dj_decks[deck]["muted"]
         if part in muted:
             muted.discard(part)
@@ -674,12 +686,14 @@ class DJMixin:
         return max(PITCH_MIN, min(PITCH_MAX, pitch))
 
     def dj_scratch_start(self, deck):
+        """ディスクを掴んだ (回転を止めてスクラッチへ)。"""
         self._dj_scratching = True
         # ストリーミング再生なら音楽に重ねてスクラッチできるので止めない。
         if not self.silent and not self.stream_ok and self.play_mode == "phrase":
             self.player.stop()          # フォールバック時のみ一旦止める
 
     def dj_scratch_move(self, deck, delta):
+        """ディスクを回した — 動いた量に応じて擦る音を鳴らす。"""
         if not self._dj_scratching or self.silent:
             return
         now = time.monotonic()
@@ -689,6 +703,7 @@ class DJMixin:
         self._dj_play_scratch(self.dj_scratch_pitch(delta))
 
     def dj_scratch_end(self, deck):
+        """ディスクを離した (回転と再生を戻す)。"""
         if not self._dj_scratching:
             return
         self._dj_scratching = False
@@ -702,6 +717,7 @@ class DJMixin:
             self._dj_last_pos = 0.0
 
     def _dj_play_scratch(self, pitch):
+        """擦る音を 1 回鳴らす (音楽に重ねる)。"""
         from ..core.constants import WAVE_PULSE
         pcm = self._dj_scratch_cache.get(pitch)
         if pcm is None:

@@ -33,6 +33,7 @@ from .project import Pattern, Project, steps_of, update
 # ---- テンポ・拍子・曲調 ----
 
 def set_bpm(project: Project, bpm: int) -> Project:
+    """テンポを変える (範囲内へ丸める)。"""
     bpm = clamp(int(bpm), BPM_MIN, BPM_MAX)
     if bpm == project.bpm:
         return project
@@ -48,6 +49,7 @@ def set_beats(project: Project, beats: int) -> Project:
 
 
 def set_key(project: Project, key: int) -> Project:
+    """キーを変える。"""
     key = clamp(int(key), 0, 11)
     if key == project.key:
         return project
@@ -108,6 +110,7 @@ def set_progression(project: Project, progression) -> Project:
 
 
 def set_seed(project: Project, seed: int) -> Project:
+    """シード値を変える (範囲内へ丸める)。"""
     seed = clamp(int(seed), SEED_MIN, SEED_MAX)
     if seed == project.seed:
         return project
@@ -191,6 +194,7 @@ def _check_part(part: int):
 
 
 def _check_layer(project: Project, wave: int, layer: int):
+    """そのパートに存在するレイヤーか確かめる。"""
     _check_part(wave)
     if not (0 <= layer < len(project.parts[wave])):
         raise ValueError(f"レイヤー番号が範囲外です: {layer}")
@@ -258,11 +262,13 @@ def cycle_note_soft(project: Project, slot: int):
 
 
 def _valid_slot(project: Project, slot: int) -> bool:
+    """有効な音符が入っているスロットか。"""
     from .note import is_active
     return 0 <= slot < len(project.phrase) and is_active(project.phrase[slot])
 
 
 def clear_phrase(project: Project) -> Project:
+    """盤面の音符をすべて消す。"""
     if project.phrase == phrase_ops.EMPTY_PHRASE:
         return project
     return update(project, phrase=phrase_ops.EMPTY_PHRASE)
@@ -485,6 +491,7 @@ def erase_song_cell(project: Project, track: int, block: int) -> Project:
 
 
 def clear_song(project: Project) -> Project:
+    """ソング構成を空にする (パターンは残す)。"""
     if project.song == song_ops.EMPTY_SONG:
         return project
     return update(project, song=song_ops.EMPTY_SONG)

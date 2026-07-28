@@ -100,6 +100,7 @@ def convex_hull(points: list) -> list:
         return pts
 
     def cross(o, a, b):
+        """3 点の外積 (凸包で曲がる向きを見る)。"""
         return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
 
     lower = []
@@ -184,6 +185,7 @@ def quantile_threshold(grid: list, percent: int) -> int:
 
 
 def _bbox(points) -> tuple:
+    """点群を囲む矩形 (左, 上, 右, 下)。"""
     xs = [p[0] for p in points]
     ys = [p[1] for p in points]
     return min(xs), min(ys), max(xs), max(ys)

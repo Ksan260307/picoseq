@@ -1,7 +1,7 @@
-﻿# PicoSeq — Retro Chiptune Sequencer
+# PicoSeq — Retro Chiptune Sequencer
 
 A desktop app for making and playing 8-bit style chiptune music.
-Place notes on a grid to build a song — or start from a photo or your own humming.
+Place notes on a grid to build a song — or start from a photo.
 
 **日本語版: [README.md](README.md)**
 
@@ -87,8 +87,6 @@ Place notes on a grid to build a song — or start from a photo or your own humm
   and tick **🔁 Hold** to loop the current phrase
 - **🗂 Pattern editor tab** — a dedicated tab between Phrase and Song to manage saved patterns
   (up to 8): load onto the board (edit), rename, duplicate, delete, preview
-- **🎤 From humming** — sing into the microphone and PicoSeq turns your pitch into a melody
-  (YIN-style pitch detection that resists octave errors even on harmonic-rich voices)
 - **🎸 Auto-accompany** — draw only a melody and matching bass, drums, and backing are generated
 - **📷 From a photo** — up to 8 rectangles found in a photo become a set of "allowed notes",
   added to the mood selector as a *Photo Scale* — compose using only those notes for inspiration
@@ -121,13 +119,21 @@ WAV export still work, but live playback is silent.
 
 ### Building an exe
 
-To build a single distributable executable (installs PyInstaller on first run):
+To build for distribution (installs PyInstaller on first run):
 
 ```console
 build_exe.bat
 ```
 
-This produces `dist\PicoSeq.exe`, which runs on PCs without Python installed.
+You get two builds with identical contents. Both run on PCs without Python installed.
+
+| Output | Startup (measured) | Best for |
+| --- | --- | --- |
+| `dist\PicoSeq\PicoSeq.exe` (folder) | **1.7–1.9 s** | normal distribution (ship the zip) |
+| `dist\PicoSeq-portable.exe` (single file) | 5.1–5.7 s | when you want one portable file |
+
+The single-file build unpacks itself into a temp folder on every launch, which is
+where the extra wait comes from. Same features, same sound either way.
 
 ### Building for phones (Android)
 
@@ -161,7 +167,6 @@ and also uploads a Windows exe on tags.
 - Shape each part (layer)'s sound with the *tone*, *length* and *volume* sliders — use
   *volume* to balance the mix (e.g. bring up the bass, pull down the rhythm)
 - **✨ Auto-compose** — each press picks a fresh seed value; type a number and press Enter to recreate that exact tune
-- **🎤 From humming** — record 6 seconds (or open a WAV file) to extract a melody
 - **🎸 Auto-accompany** — generates the other three parts to fit your melody
 - **★ Save** — store up to 8 favorite phrases as patterns
 
@@ -290,7 +295,6 @@ picoseq/
 │   │   ├── composer.py    auto-composition and accompaniment
 │   │   ├── dj.py          DJ-mode noise injection (pure functions)
 │   │   ├── arranger.py    chord inference from a melody
-│   │   ├── humming.py     pitch detection (autocorrelation, integer math)
 │   │   ├── schedule.py    timing and event expansion
 │   │   ├── synth.py       fixed-point synth (pulse/triangle/noise/saw)
 │   │   ├── renderer.py    mixer (voice cache, optional numpy fast path)
@@ -304,19 +308,26 @@ picoseq/
 │   │   ├── harmony.py     rectangles → musical scale
 │   │   └── __main__.py    CLI inspector
 │   └── ui/                screen (state changes only via actions)
-│       ├── app.py         wiring, live re-rendering
+│       ├── app.py         the wiring hub (state entry points, redraw coordination)
+│       ├── builder.py     widget construction, split per screen region
+│       ├── transport.py   playback control (start/stop, live reflect, position)
+│       ├── patterns.py    pattern management and song-grid editing
+│       ├── fileio.py      save / load / WAV & MIDI export
+│       ├── dj_control.py  DJ mode controls (decks, scratch, history)
+│       ├── selftest.py    self-diagnosis (--selftest)
+│       ├── demo.py         demo content (--demo)
 │       ├── panel.py       detachable dock panels (wm manage/forget)
 │       ├── roll_view.py   piano roll (zoom + horizontal scroll)
 │       ├── song_view.py   song grid
-│       ├── dj_view.py     DJ mode (turntables + mixer)
+│       ├── dj_view.py     DJ mode screen (turntables + mixer)
+│       ├── flowbar.py     wrapping toolbar (nothing falls off narrow screens)
 │       ├── photo.py       photo-scale dialog
-│       ├── hum.py         humming dialog
-│       ├── mic.py         microphone recording (native Windows API)
 │       ├── help.py        help screen (JP/EN)
 │       ├── i18n.py        display language (Japanese / English)
 │       ├── playback.py    playback, position clock, mid-loop restart
 │       ├── stream.py      streaming output (waveOut): gapless swaps + one-shot mixing
 │       ├── storage.py     file locations + app settings (language, zoom, window)
+│       ├── tuning.py      UI tuning values (debounce, Surprise ranges)
 │       └── theme.py       colors and fonts
 └── tests/                 test suite (py -m unittest)
 ```

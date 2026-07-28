@@ -30,9 +30,11 @@ class SoundPlayer:
     """WAV ファイルの非同期再生。silent=True なら何もしない (自己診断用)。"""
 
     def __init__(self, silent: bool = False):
+        """再生位置を測る時計を作る。"""
         self.silent = silent or winsound is None
 
     def play_file(self, path: str, loop: bool = False):
+        """WAV ファイルを鳴らす (loop=True で繰り返す)。"""
         if self.silent:
             return
         flags = winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT
@@ -41,6 +43,7 @@ class SoundPlayer:
         winsound.PlaySound(path, flags)
 
     def stop(self):
+        """再生を止める。"""
         if self.silent:
             return
         winsound.PlaySound(None, winsound.SND_PURGE)
@@ -55,16 +58,19 @@ class PlayClock:
     """
 
     def __init__(self):
+        """再生位置を測る時計を作る。"""
         self.started_at = None
         self.duration = 0.0
         self.offset = 0.0
 
     def start(self, duration_seconds: float, offset_seconds: float = 0.0):
+        """再生開始を記録する (offset_seconds から始まったとみなす)。"""
         self.duration = max(duration_seconds, 0.001)
         self.offset = offset_seconds % self.duration
         self.started_at = time.monotonic()
 
     def stop(self):
+        """再生を止める。"""
         self.started_at = None
 
     def position(self):

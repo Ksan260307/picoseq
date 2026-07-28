@@ -23,7 +23,10 @@ WAVES = (WAVE_PULSE, WAVE_TRIANGLE, WAVE_NOISE, WAVE_SAW)
 PITCHES = (36, 48, 60, 72, 83)
 TONES = (0, 25, 50, 75, 100)
 GATES = (10, 40, 80, 100)
-DUR = 5512
+# 発音の長さ。ここで見たいのは決定論・振幅の上限・無音でないことで、
+# どれも長さに依存しない。1200 通り × 2 回合成するので、短くすると全体が縮む
+# (音そのものの回帰は test_synth.py のゴールデン CRC が 5512 サンプルで見張る)。
+DUR = 2048
 
 
 class VoiceDeterminism(unittest.TestCase):

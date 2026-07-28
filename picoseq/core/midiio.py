@@ -13,7 +13,7 @@ import struct
 
 from .constants import WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRIANGLE
 from .note import soft_gain
-from .schedule import phrase_events, phrase_ticks, song_events, song_ticks
+from .schedule import phrase_events, song_events
 
 PPQ = 96                      # 4分音符あたりの MIDI tick
 TICKS_PER_STEP = PPQ // 4     # 16分音符 = 24 MIDI tick

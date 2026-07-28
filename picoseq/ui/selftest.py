@@ -12,7 +12,7 @@ from ..core import actions
 from ..core import dj as dj_core
 from ..core.constants import BEATS_MAX, BEATS_MIN, PART_COUNT, WAVE_PULSE
 from ..core.phrase import count_notes
-from ..core.project import layer_count, steps_of
+from ..core.project import layer_count
 from ..core.serialize import dumps
 from ..core.song import used_blocks
 from . import i18n, storage, theme
@@ -508,22 +508,6 @@ class SelfTestMixin:
                     or "Photo" in self._scale_labels()[-1])
             self.undo_action()  # 1 回のアンドゥで写真適用前へ戻る
             assert self.project.scale != "photo"
-
-            # 鼻歌: 合成音声 (2 音) → メロディ化
-            from ..core.humming import detect_melody
-            import math as _math
-            rate = 22050
-            samples = []
-            for freq in (220.0, 330.0):
-                for i in range(rate):
-                    samples.append(int(12000 * _math.sin(2 * _math.pi * freq * i / rate)))
-            melody = detect_melody(samples, rate, steps_of(self.project),
-                                   self.project.key, self.project.scale,
-                                   self.project.custom_scale)
-            assert melody, "鼻歌を検出できない"
-            self.apply_hum_melody(melody)
-            from ..core.arranger import melody_notes as _mel
-            assert len(_mel(self.project)) == len(melody)
 
             # 音色セット: 切替で音・背景テーマの両方が変わり、画面が作り直される
             self._syncing = True

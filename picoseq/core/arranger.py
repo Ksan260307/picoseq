@@ -15,7 +15,6 @@
 from .composer import accompany_notes
 from .constants import WAVE_PULSE, steps_per_phrase
 from .music import chord_at, get_scale
-from .note import Note
 from .phrase import active_notes, build_phrase
 from .project import Project, steps_of
 

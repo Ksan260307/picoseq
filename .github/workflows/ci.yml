@@ -32,12 +32,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: PyInstaller で exe を作る
+      - name: PyInstaller で exe を作る (フォルダ版と単一ファイル版)
         run: |
           python -m pip install pyinstaller numpy pillow
-          python -m PyInstaller --noconfirm --onefile --windowed --name PicoSeq main.py
-      - name: exe をアップロード
+          python -m PyInstaller --noconfirm --onedir --windowed --name PicoSeq main.py
+          python -m PyInstaller --noconfirm --onefile --windowed --name PicoSeq-portable main.py
+      - name: フォルダ版をアップロード (起動が速い)
         uses: actions/upload-artifact@v4
         with:
           name: picoseq-windows
-          path: dist/PicoSeq.exe
+          path: dist/PicoSeq
+      - name: 単一ファイル版をアップロード
+        uses: actions/upload-artifact@v4
+        with:
+          name: picoseq-windows-portable
+          path: dist/PicoSeq-portable.exe

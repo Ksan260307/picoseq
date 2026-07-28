@@ -181,6 +181,7 @@ def _render_pulse(total: int, inc: int, tone: int) -> list:
 
 
 def _oscillate_triangle(p16: int) -> int:
+    """三角波 1 サンプル (位相から振幅へ)。"""
     q = p16 & 32767
     if p16 < 32768:
         return q * 2 - Q15

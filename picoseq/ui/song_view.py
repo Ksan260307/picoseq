@@ -23,6 +23,7 @@ HEIGHT = TOP + CELL_H * SONG_TRACKS
 
 class SongView:
     def __init__(self, parent, app):
+        """ソング構成のマス目を組み立てる。"""
         self.app = app
         self.cell_font = tkfont.Font(font=theme.FONT_SMALL)
         self.frame = tk.Frame(parent, bg=theme.PANEL)
@@ -52,6 +53,7 @@ class SongView:
         return "…"
 
     def rebuild(self):
+        """マス目を作り直す (拍子やパターンが変わったとき)。"""
         canvas = self.canvas
         canvas.delete("all")
 
@@ -84,6 +86,7 @@ class SongView:
         self.redraw_cells()
 
     def redraw_cells(self):
+        """マスの中身だけ描き直す。"""
         canvas = self.canvas
         canvas.delete("cell")
         song = self.app.project.song
@@ -122,6 +125,7 @@ class SongView:
         self.canvas.coords(self.block_tint, bx, TOP, bx + CELL_W, HEIGHT)
 
     def _cell_at(self, event):
+        """座標から (トラック, ブロック) を求める。範囲外は None。"""
         x = event.x - MARGIN
         y = event.y - TOP
         if x < 0 or y < 0:
@@ -133,16 +137,19 @@ class SongView:
         return None
 
     def _on_press(self, event):
+        """左クリック — 選択中のパターンを置く。"""
         cell = self._cell_at(event)
         if cell:
             self.app.song_click(*cell)
 
     def _on_right_press(self, event):
+        """右クリック — マスを空にする。"""
         cell = self._cell_at(event)
         if cell:
             self.app.song_erase(*cell)
 
     def _on_motion(self, event):
+        """マウス移動 — そのマスの説明を出す。"""
         cell = self._cell_at(event)
         if cell:
             self.app.show_song_hint(*cell)

@@ -69,6 +69,7 @@ def render_events(events, bpm: int, parts: tuple, total_ticks: int,
 
 
 def _mix_extent(total_ticks, spt, wrap, rate):
+    """ミックスの長さ (ループ長と、尻尾を含めた総長)。"""
     loop_len = total_ticks * spt
     total = loop_len if wrap else loop_len + rate * TAIL_SECONDS
     return loop_len, total

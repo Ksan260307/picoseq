@@ -67,6 +67,7 @@ class _StreamCore:
     """
 
     def __init__(self, rate: int = 44100, frames: int = 2048, buffers: int = 6):
+        """再生の共通状態を用意する (まだデバイスは開かない)。"""
         self.rate = rate
         self.frames = frames
         self.buffers = buffers
@@ -180,6 +181,7 @@ class _StreamCore:
     # ---- ミックスの中身 (デバイス非依存・単体テスト対象) ----
 
     def _next_chunk(self) -> bytes:
+        """次に送り出す 1 かたまりを作る (ループの折り返し込み)。"""
         chunk = array("h", bytes(self.frames * 2))
         with self._lock:
             loop = self._loop
@@ -253,6 +255,7 @@ class WinmmStream(_StreamCore):
     """Windows の winmm (waveOut) バックエンド。検証済みの本命経路。"""
 
     def __init__(self, rate: int = 44100, frames: int = 2048, buffers: int = 6):
+        """waveOut 用の状態を用意する (デバイスは open() で開く)。"""
         super().__init__(rate, frames, buffers)
         self._winmm = None
         self._handle = None
@@ -263,6 +266,7 @@ class WinmmStream(_StreamCore):
         self._running = False
 
     def open(self) -> bool:
+        """waveOut を開き、送り出しスレッドを起こす。無理なら False。"""
         if sys.platform != "win32":
             return False
         try:
@@ -291,6 +295,7 @@ class WinmmStream(_StreamCore):
         return True
 
     def close(self):
+        """送り出しを止め、確保したバッファを解放する。"""
         self._running = False
         thread = self._thread
         if thread is not None:
@@ -342,11 +347,13 @@ class SounddeviceStream(_StreamCore):
     """
 
     def __init__(self, rate: int = 44100, frames: int = 2048, buffers: int = 6):
+        """PortAudio 用の状態を用意する (sounddevice が無ければ開けない)。"""
         super().__init__(rate, frames, buffers)
         self._sd = _sounddevice()
         self._out = None
 
     def open(self) -> bool:
+        """PortAudio の出力を開く。使えなければ False (呼び出し側が代替へ落ちる)。"""
         if self._sd is None:
             return False
         try:
@@ -369,6 +376,7 @@ class SounddeviceStream(_StreamCore):
             self._out = None
 
     def _callback(self, outdata, frames, time_info, status):  # noqa: ARG002
+        """音声デバイスからの要求に応えて次のかたまりを渡す。"""
         data = self._next_chunk()
         # blocksize=self.frames なので frames は一致する。念のため長さを合わせる。
         need = len(outdata)

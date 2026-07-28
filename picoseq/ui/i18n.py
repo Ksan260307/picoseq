@@ -15,6 +15,7 @@ def get_lang() -> str:
 
 
 def set_lang(lang: str):
+    """表示言語を切り替える (未知の指定は日本語へ)。"""
     global _lang
     if lang in LANGS:
         _lang = lang
@@ -182,7 +183,6 @@ STRINGS = {
     "lbl_seed": {"ja": "シード値", "en": "Seed"},
     "btn_auto": {"ja": "✨ 自動作成", "en": "✨ Auto"},
     "btn_surprise": {"ja": "🎲 サプライズ", "en": "🎲 Surprise"},
-    "btn_hum": {"ja": "🎤 鼻歌から", "en": "🎤 From humming"},
     "btn_photo": {"ja": "📷 写真から", "en": "📷 From photo"},
     "btn_arrange": {"ja": "🎸 伴奏づけ", "en": "🎸 Add backing"},
     # パート・スライダーバー
@@ -270,8 +270,6 @@ STRINGS = {
                      "en": "Non-melody parts will be regenerated. Continue?"},
     "st_arranged": {"ja": "メロディに合わせて伴奏を付けました。曲調・シードを変えると雰囲気が変わります。",
                     "en": "Added backing to your melody. Change mood/seed for a different feel."},
-    "st_hum_placed": {"ja": "鼻歌から {n} 音のメロディを置きました。「🎸 伴奏づけ」で伴奏も付けられます。",
-                      "en": "Placed a {n}-note melody from your humming. Try \"🎸 Add backing\" too."},
     "dlg_pick_photo": {"ja": "写真を選ぶ", "en": "Choose a photo"},
     "ft_image": {"ja": "画像", "en": "Image"},
     "ft_all": {"ja": "すべて", "en": "All files"},
@@ -345,33 +343,6 @@ STRINGS = {
     "st_sound_changed": {"ja": "音色を「{label}」に変えました。背景も衣替えしています。",
                          "en": "Switched sound to \"{label}\". The theme changed to match."},
     "st_lang_changed": {"ja": "表示を日本語にしました。", "en": "Switched display to English."},
-    # 鼻歌ダイアログ
-    "hum_title": {"ja": "鼻歌からメロディを作る", "en": "Make a melody from humming"},
-    "hum_head": {"ja": "🎤 鼻歌からメロディを作る", "en": "🎤 Make a melody from humming"},
-    "hum_intro": {
-        "ja": "「ラララ〜」と口ずさんだ声の高さを読み取って、\nいま選んでいるキー・曲調の音に合わせたメロディにします。",
-        "en": "Reads the pitch of your humming and snaps it\nto the current key and mood."},
-    "hum_ready": {"ja": "録音するか、録音済みの WAV ファイルを選んでください。",
-                  "en": "Record, or choose a recorded WAV file."},
-    "hum_record": {"ja": "● 録音する ({sec}秒)", "en": "● Record ({sec}s)"},
-    "hum_open_wav": {"ja": "📁 WAV を開く", "en": "📁 Open WAV"},
-    "hum_make": {"ja": "♪ メロディにする", "en": "♪ Make melody"},
-    "hum_close": {"ja": "閉じる", "en": "Close"},
-    "hum_no_mic": {"ja": "この環境ではマイク録音できません。WAV ファイルを使ってください。",
-                   "en": "Mic recording isn't available here. Please use a WAV file."},
-    "hum_recording_btn": {"ja": "● 録音中… 歌ってください!", "en": "● Recording… sing!"},
-    "hum_recording": {"ja": "録音中です ({sec} 秒間)。マイクに向かって歌ってください。",
-                      "en": "Recording ({sec} s). Sing into the mic."},
-    "hum_open_title": {"ja": "鼻歌の WAV を開く", "en": "Open humming WAV"},
-    "hum_analyzing_file": {"ja": "ファイルを解析中…", "en": "Analyzing file…"},
-    "hum_analyzing_pitch": {"ja": "声の高さを解析中…", "en": "Analyzing pitch…"},
-    "hum_not_heard": {"ja": "メロディを聞き取れませんでした。\nもう少し大きな声で、ゆっくり歌ってみてください。",
-                      "en": "Couldn't hear a melody.\nTry singing a bit louder and slower."},
-    "hum_heard": {"ja": "{n} 個の音を聞き取りました。「♪ メロディにする」で盤面に置きます。",
-                  "en": "Heard {n} notes. Press \"♪ Make melody\" to place them."},
-    "hum_err_16bit": {"ja": "16bit の WAV のみ対応しています。", "en": "Only 16-bit WAV is supported."},
-    "hum_err_channels": {"ja": "モノラルかステレオの WAV のみ対応しています。",
-                         "en": "Only mono or stereo WAV is supported."},
     # フォト音階ダイアログ
     "photo_title": {"ja": "フォト音階 — 写真から音階を取り込む",
                     "en": "Photo scale — import a scale from a photo"},

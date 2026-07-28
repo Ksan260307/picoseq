@@ -178,12 +178,14 @@ def _custom_scale_from_json(raw):
 
 
 def _as_int(value, fallback: int) -> int:
+    """整数として読む。数でなければ既定値。"""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return fallback
     return int(value)
 
 
 def _as_list(value, length: int) -> list:
+    """決まった長さのリストにする (足りない分は None)。"""
     items = list(value) if isinstance(value, list) else []
     items += [None] * (length - len(items))
     return items[:length]
@@ -277,6 +279,7 @@ def _cover_layers(parts: tuple, notes: list) -> tuple:
 
 
 def _song_from_json(raw) -> tuple:
+    """ソング構成を復元する (範囲外は空きマスへ)。"""
     cells = []
     items = _as_list(raw, SONG_TRACKS * SONG_BLOCKS)
     for value in items:
@@ -311,6 +314,7 @@ def from_legacy(data: dict) -> Project:
 
 
 def _legacy_buffer(raw) -> tuple:
+    """旧版の音符バッファを読む。"""
     notes = []
     if isinstance(raw, list):
         for value in raw:
@@ -326,6 +330,7 @@ def _legacy_buffer(raw) -> tuple:
 
 
 def _song_from_legacy(raw) -> tuple:
+    """旧版のソング構成を読む。"""
     if not isinstance(raw, list):
         return EMPTY_SONG
     cells = []
@@ -337,6 +342,7 @@ def _song_from_legacy(raw) -> tuple:
 
 
 def _parts_from_legacy(raw) -> tuple:
+    """旧版のパート設定を読む (レイヤー 1 つとして扱う)。"""
     parts = []
     for i in range(PART_COUNT):
         entry = None

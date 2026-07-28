@@ -26,6 +26,7 @@ EDGE = 6       # 右端に残す余白 (ウィンドウ枠にぴったり付け�
 
 class FlowBar(tk.Frame):
     def __init__(self, parent, bg, gap=GAP, row_gap=ROW_GAP, **kw):
+        """折り返しバーを作る。"""
         super().__init__(parent, bg=bg, **kw)
         self._gap = gap
         self._row_gap = row_gap
@@ -85,6 +86,7 @@ class FlowBar(tk.Frame):
         self.after_idle(self._flush)
 
     def _flush(self):
+        """予約された並べ直しを実行する。"""
         self._queued = False
         if self._laying_out:                 # 進行中なら次の空きへ回す
             self._queued = True
@@ -97,6 +99,7 @@ class FlowBar(tk.Frame):
         self._relayout(width)
 
     def _relayout(self, avail):
+        """幅に合わせて子を並べ直す (収まらなければ次の行へ)。"""
         if not self._cells or self._laying_out:
             return
         if avail <= 1:
@@ -125,6 +128,7 @@ class FlowBar(tk.Frame):
         return rows
 
     def _place(self, rows, avail):
+        """1 つの子を指定位置へ置く。"""
         y = 0
         total_h = 0
         single = len(rows) == 1

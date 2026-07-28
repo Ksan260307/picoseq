@@ -42,6 +42,7 @@ def scale_choices():
 
 class DJView:
     def __init__(self, parent, app):
+        """DJ 画面を組み立てる (デッキ 2 枚とミキサー)。"""
         self.app = app
         self.deck_angle = {"a": 0.0, "b": 0.0}
         self.platters = {}
@@ -66,6 +67,7 @@ class DJView:
     # ---- デッキ (ターンテーブル + チャンネルストリップ) ----
 
     def _build_deck(self, key, strip_side):
+        """片方のデッキ (ターンテーブルとつまみ) を作る。"""
         color = _deck_color(key)
         deck = DECK_KEYS.index(key)
         wrap = tk.Frame(self.console, bg=theme.BG)
@@ -107,127 +109,127 @@ class DJView:
         self._build_strip(strip, key, deck)
 
     def _build_strip(self, strip, key, deck):
-        """デッキ 1 台ぶんの操作列 (曲調・テンポ・ノイズ・フィルター・固定・KILL)。"""
+        """デッキ 1 台ぶんの操作列。区画ごとに分けて上から積む。
+
+        各 _strip_* は「使った次の行番号」を返す。行番号を持ち回るのは
+        つまみを足し引きしたときに他の区画をいちいち直さないため。
+        """
         widgets = self.decks[key]
         strip.columnconfigure(0, minsize=STRIP_LABEL)
-        row = 0
+        row = self._strip_pickers(strip, widgets, deck, 0)
+        row = self._strip_mix_sliders(strip, widgets, deck, row)
+        row = self._strip_part_editor(strip, widgets, deck, row)
+        row = self._strip_toggles(strip, widgets, deck, row)
+        self._strip_foot(strip, deck, row)
 
-        def label(key_name, r):
-            tk.Label(strip, text=t(key_name), font=theme.FONT_SMALL, bg=theme.PANEL,
-                     fg=theme.TEXT_DIM, anchor="e").grid(row=r, column=0, sticky="e",
-                                                         padx=(0, 6), pady=2)
+    # ---- 操作列の部品 ----
 
-        def slider_row(r, label_key, lo, hi, command, active, width=4):
-            """ラベル｜スライダー＋数値 の 1 行を作り、(スライダー, 数値 var) を返す。"""
-            label(label_key, r)
-            holder = tk.Frame(strip, bg=theme.PANEL)
-            holder.grid(row=r, column=1, sticky="w", pady=2)
-            scale = tk.Scale(holder, from_=lo, to=hi, orient="horizontal",
-                             length=SLIDER_LEN, showvalue=0, command=command,
-                             bg=theme.PANEL, troughcolor=theme.BTN_BG,
-                             highlightthickness=0, bd=0, sliderlength=16, width=11,
-                             activebackground=active)
-            scale.pack(side="left")
-            var = tk.StringVar()
-            tk.Label(holder, textvariable=var, font=theme.FONT_SMALL, width=width,
-                     bg=theme.PANEL, fg=theme.TEXT, anchor="w").pack(side="left",
-                                                                     padx=(4, 0))
-            return scale, var
+    def _strip_label(self, strip, key_name, row):
+        """左列のラベル (右寄せ)。"""
+        tk.Label(strip, text=t(key_name), font=theme.FONT_SMALL, bg=theme.PANEL,
+                 fg=theme.TEXT_DIM, anchor="e").grid(row=row, column=0, sticky="e",
+                                                     padx=(0, 6), pady=2)
 
-        # 曲調 (65 種類から任意に選ぶ)
-        label("dj_mood_label", row)
-        combo = ttk.Combobox(strip, values=scale_choices(), state="readonly",
-                             width=MOOD_WIDTH, font=theme.FONT_SMALL)
-        combo.grid(row=row, column=1, sticky="w", pady=2)
-        combo.bind("<<ComboboxSelected>>",
-                   lambda e, d=deck, c=combo: self._on_mood(d, c))
-        widgets["mood"] = combo
-        row += 1
+    def _strip_slider(self, strip, row, label_key, lo, hi, command, active,
+                      width=4):
+        """ラベル｜スライダー＋数値 の 1 行を作り、(スライダー, 数値 var) を返す。"""
+        self._strip_label(strip, label_key, row)
+        holder = tk.Frame(strip, bg=theme.PANEL)
+        holder.grid(row=row, column=1, sticky="w", pady=2)
+        scale = tk.Scale(holder, from_=lo, to=hi, orient="horizontal",
+                         length=SLIDER_LEN, showvalue=0, command=command,
+                         bg=theme.PANEL, troughcolor=theme.BTN_BG,
+                         highlightthickness=0, bd=0, sliderlength=16, width=11,
+                         activebackground=active)
+        scale.pack(side="left")
+        var = tk.StringVar()
+        tk.Label(holder, textvariable=var, font=theme.FONT_SMALL, width=width,
+                 bg=theme.PANEL, fg=theme.TEXT, anchor="w").pack(side="left",
+                                                                 padx=(4, 0))
+        return scale, var
 
-        # キー (0=C .. 11=B)
-        label("dj_key_label", row)
-        key_combo = ttk.Combobox(strip, values=list(KEY_NAMES), state="readonly",
+    def _strip_glyph_row(self, strip, row, label_key, command):
+        """M/B/R/S の 4 ボタンを 1 行に並べ、ボタンの並びを返す。"""
+        self._strip_label(strip, label_key, row)
+        holder = tk.Frame(strip, bg=theme.PANEL)
+        holder.grid(row=row, column=1, sticky="w", pady=2)
+        buttons = []
+        for i, glyph in enumerate(("M", "B", "R", "S")):
+            btn = tk.Button(holder, text=glyph, font=theme.FONT_SMALL, width=2,
+                            relief="flat", bd=1, takefocus=0, cursor="hand2",
+                            command=lambda i=i: command(i))
+            btn.pack(side="left", padx=1)
+            buttons.append(btn)
+        return buttons
+
+    def _strip_pickers(self, strip, widgets, deck, row):
+        """曲調・キー・音色の選択欄 (どれもデッキごとに独立)。"""
+        specs = (
+            ("mood", "dj_mood_label", scale_choices(), self._on_mood),
+            ("key", "dj_key_label", list(KEY_NAMES), self._on_key),
+            # 音色はデッキごと。フレーズ画面と違い配色は変えない
+            ("sound", "lbl_sound",
+             [i18n.sound_label(s) for s in theme.SOUND_IDS], self._on_sound),
+        )
+        for name, label_key, values, handler in specs:
+            self._strip_label(strip, label_key, row)
+            combo = ttk.Combobox(strip, values=values, state="readonly",
                                  width=MOOD_WIDTH, font=theme.FONT_SMALL)
-        key_combo.grid(row=row, column=1, sticky="w", pady=2)
-        key_combo.bind("<<ComboboxSelected>>",
-                       lambda e, d=deck, c=key_combo: self._on_key(d, c))
-        widgets["key"] = key_combo
-        row += 1
+            combo.grid(row=row, column=1, sticky="w", pady=2)
+            combo.bind("<<ComboboxSelected>>",
+                       lambda e, d=deck, c=combo, h=handler: h(d, c))
+            widgets[name] = combo
+            row += 1
+        return row
 
-        # 音色 (デッキごと。フレーズ画面と違い配色は変えない)
-        label("lbl_sound", row)
-        sound_combo = ttk.Combobox(
-            strip, values=[i18n.sound_label(s) for s in theme.SOUND_IDS],
-            state="readonly", width=MOOD_WIDTH, font=theme.FONT_SMALL)
-        sound_combo.grid(row=row, column=1, sticky="w", pady=2)
-        sound_combo.bind("<<ComboboxSelected>>",
-                         lambda e, d=deck, c=sound_combo: self._on_sound(d, c))
-        widgets["sound"] = sound_combo
-        row += 1
-
-        widgets["tempo"], widgets["tempo_var"] = slider_row(
-            row, "dj_tempo", BPM_MIN, BPM_MAX,
+    def _strip_mix_sliders(self, strip, widgets, deck, row):
+        """テンポとノイズ。"""
+        widgets["tempo"], widgets["tempo_var"] = self._strip_slider(
+            strip, row, "dj_tempo", BPM_MIN, BPM_MAX,
             lambda v, d=deck: self._on_tempo(d, v), theme.ACCENT)
         row += 1
-        widgets["noise"], widgets["noise_var"] = slider_row(
-            row, "dj_noise", 0, 4,
+        widgets["noise"], widgets["noise_var"] = self._strip_slider(
+            strip, row, "dj_noise", 0, 4,
             lambda v, d=deck: self._on_noise(d, v), theme.DANGER, width=2)
-        row += 1
-        # パートごとの音作り: パート選択 (M/B/R/S) → 音色・長さ のスライダーで編集
-        label("dj_part_label", row)
-        picker = tk.Frame(strip, bg=theme.PANEL)
-        picker.grid(row=row, column=1, sticky="w", pady=2)
-        widgets["part_btns"] = []
-        for i, glyph in enumerate(("M", "B", "R", "S")):
-            btn = tk.Button(picker, text=glyph, font=theme.FONT_SMALL, width=2,
-                            relief="flat", bd=1, takefocus=0, cursor="hand2",
-                            command=lambda i=i, d=deck: self._focus_part(d, i))
-            btn.pack(side="left", padx=1)
-            widgets["part_btns"].append(btn)
-        row += 1
-        widgets["part_tone"], widgets["part_tone_var"] = slider_row(
-            row, "lbl_tone", 0, 100,
-            lambda v, d=deck: self._on_part_tone(d, v), theme.ACCENT)
-        row += 1
-        widgets["part_gate"], widgets["part_gate_var"] = slider_row(
-            row, "lbl_gate", 10, 100,
-            lambda v, d=deck: self._on_part_gate(d, v), theme.ACCENT)
-        row += 1
-        widgets["part_volume"], widgets["part_volume_var"] = slider_row(
-            row, "lbl_volume", 0, 100,
-            lambda v, d=deck: self._on_part_volume(d, v), theme.ACCENT)
-        row += 1
-        widgets["filter"], widgets["filter_var"] = slider_row(
-            row, "dj_filter", 0, 100,
-            lambda v, d=deck: self._on_filter(d, v), theme.ACCENT)
-        row += 1
+        return row + 1
 
-        # ループ固定
+    def _strip_part_editor(self, strip, widgets, deck, row):
+        """パート選択 (M/B/R/S) と、そのパートの音色・長さ・音量・フィルター。"""
+        widgets["part_btns"] = self._strip_glyph_row(
+            strip, row, "dj_part_label", lambda i, d=deck: self._focus_part(d, i))
+        row += 1
+        sliders = (
+            ("part_tone", "lbl_tone", 0, 100, self._on_part_tone),
+            ("part_gate", "lbl_gate", 10, 100, self._on_part_gate),
+            ("part_volume", "lbl_volume", 0, 100, self._on_part_volume),
+            ("filter", "dj_filter", 0, 100, self._on_filter),
+        )
+        for name, label_key, lo, hi, handler in sliders:
+            widgets[name], widgets[f"{name}_var"] = self._strip_slider(
+                strip, row, label_key, lo, hi,
+                lambda v, d=deck, h=handler: h(d, v), theme.ACCENT)
+            row += 1
+        return row
+
+    def _strip_toggles(self, strip, widgets, deck, row):
+        """ループ固定のチェックと、KILL (パート消音)。"""
         hold_var = tk.BooleanVar(value=False)
         widgets["hold_var"] = hold_var
-        tk.Checkbutton(strip, text=t("dj_hold"), variable=hold_var,
-                       command=lambda d=deck, v=hold_var: self.app.dj_set_hold(d, v.get()),
-                       font=theme.FONT_SMALL, bg=theme.PANEL, fg=theme.TEXT,
-                       selectcolor=theme.BTN_BG, activebackground=theme.PANEL,
-                       activeforeground=theme.TEXT, highlightthickness=0, bd=0,
-                       takefocus=0, cursor="hand2").grid(row=row, column=1, sticky="w",
-                                                         pady=(4, 2))
+        tk.Checkbutton(
+            strip, text=t("dj_hold"), variable=hold_var,
+            command=lambda d=deck, v=hold_var: self.app.dj_set_hold(d, v.get()),
+            font=theme.FONT_SMALL, bg=theme.PANEL, fg=theme.TEXT,
+            selectcolor=theme.BTN_BG, activebackground=theme.PANEL,
+            activeforeground=theme.TEXT, highlightthickness=0, bd=0,
+            takefocus=0, cursor="hand2").grid(row=row, column=1, sticky="w",
+                                              pady=(4, 2))
         row += 1
+        widgets["kill"] = self._strip_glyph_row(
+            strip, row, "dj_kill", lambda i, d=deck: self.app.dj_kill(d, i))
+        return row + 1
 
-        # KILL (パート消音)
-        label("dj_kill", row)
-        kill = tk.Frame(strip, bg=theme.PANEL)
-        kill.grid(row=row, column=1, sticky="w", pady=2)
-        widgets["kill"] = []
-        for i, glyph in enumerate(("M", "B", "R", "S")):
-            btn = tk.Button(kill, text=glyph, font=theme.FONT_SMALL, width=2,
-                            command=lambda i=i, d=deck: self.app.dj_kill(d, i),
-                            relief="flat", bd=1, takefocus=0, cursor="hand2")
-            btn.pack(side="left", padx=1)
-            widgets["kill"].append(btn)
-        row += 1
-
-        # 生成 (新しいフレーズ) と SYNC (もう一方へテンポ・キーを合わせる)
+    def _strip_foot(self, strip, deck, row):
+        """生成 (新しいフレーズ) と SYNC (もう一方へテンポ・キーを合わせる)。"""
         foot = tk.Frame(strip, bg=theme.PANEL)
         foot.grid(row=row, column=0, columnspan=2, pady=(6, 0))
         self.app._button(foot, t("dj_roll"), lambda d=deck: self.app.dj_roll(d),
@@ -236,6 +238,7 @@ class DJView:
                          lambda d=deck: self.app.dj_sync(d)).pack(side="left", padx=2)
 
     def _draw_platter(self, canvas, color, letter):
+        """ターンテーブルの円盤を描く。"""
         c = PLATTER // 2
         canvas.create_oval(c - R_OUTER, c - R_OUTER, c + R_OUTER, c + R_OUTER,
                            fill="#0a0a0a", outline=theme.PANEL_EDGE, width=2)
@@ -259,6 +262,7 @@ class DJView:
     # ---- 中央 (共通操作) ----
 
     def _build_mixer(self):
+        """中央のミキサー (クロスフェーダー・録音・履歴) を作る。"""
         mix = tk.Frame(self.console, bg=theme.PANEL, padx=12, pady=10,
                        highlightbackground=theme.PANEL_EDGE, highlightthickness=1)
         self.console.add(mix)
@@ -382,6 +386,7 @@ class DJView:
             self._bind_wheel(rows, self._log_canvas[kind])   # 行の上でも回せるように
 
     def _log_row(self, parent, entry, favorites):
+        """履歴/お気に入りの 1 行を作る。"""
         row = tk.Frame(parent, bg=theme.PANEL)
         row.pack(fill="x", pady=1)
         deck_key = DECK_KEYS[max(0, min(1, entry.get("deck", 0)))]
@@ -408,6 +413,7 @@ class DJView:
     # ---- スクラッチ ----
 
     def _mouse_angle(self, event):
+        """円盤の中心から見たマウスの角度。"""
         c = PLATTER // 2
         return math.degrees(math.atan2(event.y - c, event.x - c))
 
@@ -416,6 +422,7 @@ class DJView:
                       "moved": False, "started": False}
 
     def _on_platter_motion(self, key, event):
+        """円盤をドラッグ中 — 回した量をスクラッチへ渡す。"""
         grab = self._grab
         if not grab or grab["key"] != key:
             return
@@ -431,6 +438,7 @@ class DJView:
         self.app.dj_scratch_move(DECK_KEYS.index(key), delta)
 
     def _on_platter_release(self, key, event):
+        """円盤から手を離した。"""
         grab = self._grab
         self._grab = None
         if not grab:
@@ -447,6 +455,7 @@ class DJView:
             self.app.dj_set_crossfade(int(float(value)))
 
     def _on_mood(self, deck, combo):
+        """曲調セレクタが変わった。"""
         if self._syncing:
             return
         index = combo.current()
@@ -454,6 +463,7 @@ class DJView:
             self.app.dj_set_scale(deck, SCALE_IDS[index])
 
     def _on_key(self, deck, combo):
+        """キーセレクタが変わった。"""
         if self._syncing:
             return
         index = combo.current()
@@ -461,6 +471,7 @@ class DJView:
             self.app.dj_set_key(deck, index)
 
     def _on_sound(self, deck, combo):
+        """音色セレクタが変わった。"""
         if self._syncing:
             return
         index = combo.current()
@@ -468,12 +479,14 @@ class DJView:
             self.app.dj_set_sound(deck, theme.SOUND_IDS[index])
 
     def _on_tempo(self, deck, value):
+        """テンポつまみが動いた。"""
         key = DECK_KEYS[deck]
         self.decks[key]["tempo_var"].set(str(int(float(value))))
         if not self._syncing:
             self.app.dj_set_tempo(deck, int(float(value)))
 
     def _on_noise(self, deck, value):
+        """ノイズつまみが動いた。"""
         key = DECK_KEYS[deck]
         self.decks[key]["noise_var"].set(str(int(float(value))))
         if not self._syncing:
@@ -486,24 +499,28 @@ class DJView:
         self.app._update_dj_decks()      # スライダーを選んだパートの値へ合わせる
 
     def _on_part_tone(self, deck, value):
+        """パートの質感つまみが動いた。"""
         key = DECK_KEYS[deck]
         self.decks[key]["part_tone_var"].set(str(int(float(value))))
         if not self._syncing:
             self.app.dj_set_part_tone(deck, self._part_focus[key], int(float(value)))
 
     def _on_part_gate(self, deck, value):
+        """パートの長さつまみが動いた。"""
         key = DECK_KEYS[deck]
         self.decks[key]["part_gate_var"].set(str(int(float(value))))
         if not self._syncing:
             self.app.dj_set_part_gate(deck, self._part_focus[key], int(float(value)))
 
     def _on_part_volume(self, deck, value):
+        """パートの音量つまみが動いた。"""
         key = DECK_KEYS[deck]
         self.decks[key]["part_volume_var"].set(str(int(float(value))))
         if not self._syncing:
             self.app.dj_set_part_volume(deck, self._part_focus[key], int(float(value)))
 
     def _on_filter(self, deck, value):
+        """フィルターつまみが動いた。"""
         key = DECK_KEYS[deck]
         self.decks[key]["filter_var"].set(str(int(float(value))))
         if not self._syncing:
@@ -563,6 +580,7 @@ class DJView:
             self._syncing = False
 
     def sync_crossfade(self, active):
+        """クロスフェーダーの位置を今のデッキに合わせる。"""
         self._syncing = True
         try:
             self.cross.set(0 if active == 0 else 100)
@@ -570,6 +588,7 @@ class DJView:
             self._syncing = False
 
     def set_tempo(self, deck, bpm):
+        """テンポ表示を更新する。"""
         key = DECK_KEYS[deck]
         self._syncing = True
         try:
@@ -597,12 +616,14 @@ class DJView:
             self.rec_btn.configure(text=t("dj_record"), bg=theme.BTN_BG, fg=theme.TEXT)
 
     def update_spin(self, active_key, spinning, beat_level):
+        """円盤の回転位置を更新する (再生位置に追従)。"""
         if spinning:
             self.deck_angle[active_key] = (self.deck_angle[active_key] + 11) % 360
         for key in DECK_KEYS:
             self._place_marks(key, self.deck_angle[key], key == active_key, beat_level)
 
     def _place_marks(self, key, angle_deg, active, beat_level):
+        """円盤の目印を回転位置へ置き直す。"""
         plat = self.platters[key]
         canvas = plat["canvas"]
         c = PLATTER // 2

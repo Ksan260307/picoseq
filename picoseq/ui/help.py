@@ -1,4 +1,4 @@
-﻿"""ヘルプ画面 — 使い方・ショートカット・各機能の説明 (日英)。"""
+"""ヘルプ画面 — 使い方・ショートカット・各機能の説明 (日英)。"""
 
 import tkinter as tk
 
@@ -46,8 +46,6 @@ SECTIONS_JA = [
                         "(激しい曲調なら速く、幻想なら遅く)。拍子はソング構成を組み立て済みのときは"
                         "変わりません (ブロックの長さが変わると構成を作り直すことになるため)。"
                         "どのキーでもメロディの音域は 2 オクターブで一定です。"),
-        ("🎤 鼻歌から", "マイクに向かって歌う (または録音済み WAV を開く) と、声の高さを読み取って"
-                      "メロディにします。そのあと「🎸 伴奏づけ」を押すと曲になります。"),
         ("🎸 伴奏づけ", "メロディ (パート1) だけを置いて押すと、その旋律に合うベース・リズム・サブを自動で付けます。"),
         ("📷 写真から", "写真の中の四角形 (最大8個) を読み取り、それぞれの位置を音に変えて「フォト音階」を作ります。"
                       "曲調に「📷 フォト音階」が追加され、その音だけを使った作曲を楽しめます。"),
@@ -146,8 +144,6 @@ SECTIONS_EN = [
                        "slow for dreamy ones). The meter is left alone once you have built a song, since "
                        "changing it would reset the arrangement. The melody keeps the same two-octave "
                        "span in every key."),
-        ("🎤 From humming", "Sing into the mic (or open a recorded WAV) and it reads your pitch "
-                          "into a melody. Then press \"🎸 Add backing\" to turn it into a song."),
         ("🎸 Add backing", "Place only a melody (part 1) and press it to auto-add matching bass, rhythm and sub."),
         ("📷 From photo", "Reads rectangles (up to 8) in a photo and turns their positions into a \"photo scale\". "
                         "\"📷 Photo scale\" is added to Mood so you can compose using just those notes."),
@@ -252,6 +248,7 @@ _TEXT = {
 
 class HelpDialog:
     def __init__(self, app):
+        """ヘルプウィンドウを組み立てる。"""
         if getattr(app, "silent", False):
             return
         lang = i18n.get_lang()
@@ -303,6 +300,7 @@ class HelpDialog:
         return inner
 
     def _section(self, parent, title, items):
+        """見出しと項目の並びを 1 区画ぶん描く。"""
         tk.Label(parent, text=title, font=theme.FONT_BOLD, bg=theme.BG,
                  fg=theme.ACCENT, anchor="w").pack(fill="x", pady=(10, 2))
         for name, desc in items:
@@ -315,6 +313,7 @@ class HelpDialog:
                      anchor="w").pack(side="left", fill="x", expand=True)
 
     def _shortcuts(self, parent, shortcuts, heading):
+        """キーボードショートカットの一覧を描く。"""
         tk.Label(parent, text=heading, font=theme.FONT_BOLD, bg=theme.BG,
                  fg=theme.ACCENT, anchor="w").pack(fill="x", pady=(12, 2))
         for keys, desc in shortcuts:

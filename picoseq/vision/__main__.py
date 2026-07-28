@@ -8,6 +8,7 @@ from .quad import detect_quads
 
 
 def main(argv) -> int:
+    """写真を解析して、見つかった四角形と音階を表示する (動作確認用)。"""
     if len(argv) != 1:
         print("使い方: py -m picoseq.vision <画像ファイル (PNG/BMP/PPM/JPEG)>")
         return 2

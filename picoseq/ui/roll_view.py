@@ -28,6 +28,7 @@ ZOOM_STEP = 1.25   # ボタン 1 回あたりの倍率
 
 class RollView:
     def __init__(self, parent, app):
+        """ピアノロールを組み立てる (鍵盤・グリッド・スクロール)。"""
         self.app = app
         self.zoom = getattr(app, "roll_zoom", 1.0)
         self.cell_w = 24
@@ -93,6 +94,7 @@ class RollView:
         self.set_zoom(1.0)
 
     def _xview(self, *args):
+        """横スクロール — 鍵盤を左端に貼り付けたまま動かす。"""
         self.canvas.xview(*args)
         self._pin_keys()
 
@@ -220,6 +222,7 @@ class RollView:
         self._pin_keys()
 
     def _draw_note(self, note, steps, fill, outline):
+        """音符を 1 つ描く。"""
         dur = min(note.dur, steps - note.step)
         x0 = KEY_W + note.step * self.cell_w + 1
         y0 = (PITCH_MAX - note.pitch) * self.cell_h + 1
@@ -258,6 +261,7 @@ class RollView:
     # ---- マウス操作 ----
 
     def _on_press(self, event):
+        """左クリック — 鍵盤なら試聴、マス目なら置く/消す。"""
         zone, pitch, step = self._locate(event)
         if zone == "key":
             self.app.preview_note(pitch)
@@ -267,6 +271,7 @@ class RollView:
             self.drag_anchor = anchor
 
     def _on_drag(self, event):
+        """ドラッグ — 音符を右へ伸ばす。"""
         if self.drag_slot == -1:
             return
         zone, _, step = self._locate(event)
@@ -286,11 +291,13 @@ class RollView:
         return "break"      # 通常のクリック (置く) を走らせない
 
     def _on_right_press(self, event):
+        """右クリック — その位置の音符を消す。"""
         zone, pitch, step = self._locate(event)
         if zone == "grid":
             self.app.roll_erase(pitch, step)
 
     def _on_motion(self, event):
+        """マウス移動 — 枠を追従させ、位置の説明を出す。"""
         zone, pitch, step = self._locate(event)
         if zone == "grid":
             x0 = KEY_W + step * self.cell_w
@@ -305,14 +312,17 @@ class RollView:
         self.canvas.coords(self.hover_item, -10, -10, -10, -10)
 
     def _on_wheel(self, event):
+        """ホイール — 縦スクロール。"""
         self.canvas.yview_scroll(-event.delta // 120 * 3, "units")
         self._pin_keys()
 
     def _on_shift_wheel(self, event):
+        """Shift+ホイール — 横スクロール。"""
         self.canvas.xview_scroll(-event.delta // 120 * 3, "units")
         self._pin_keys()
 
     def _on_ctrl_wheel(self, event):
+        """Ctrl+ホイール — 拡大縮小。"""
         if event.delta > 0:
             self.zoom_in()
         else:

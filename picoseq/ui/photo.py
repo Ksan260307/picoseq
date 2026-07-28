@@ -24,6 +24,7 @@ class PhotoDialog:
     """検出した四角形 (最大 8 個) と音階を見せ、取り込み方を選ばせる。"""
 
     def __init__(self, app, grid, quads, photo):
+        """写真から取り込んだ音階を確認するダイアログを組み立てる。"""
         self.app = app
         self.photo_scale = photo
 
@@ -79,9 +80,11 @@ class PhotoDialog:
         win.bind("<Escape>", lambda e: win.destroy())
 
     def _apply_and_generate(self):
+        """この音階を取り込んで、そのまま 1 フレーズ作る。"""
         self.win.destroy()
         self.app.apply_photo_scale(self.photo_scale, generate=True)
 
     def _apply_only(self):
+        """音階だけ取り込む (盤面はそのまま)。"""
         self.win.destroy()
         self.app.apply_photo_scale(self.photo_scale, generate=False)

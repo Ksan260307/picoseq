@@ -211,6 +211,7 @@ def toggle_favorite(favorites, entry, limit=FAVORITES_MAX):
 
 
 def is_favorite(favorites, entry) -> bool:
+    """そのフレーズがお気に入りに入っているか。"""
     target = entry_id(entry)
     return any(entry_id(e) == target for e in favorites)
 

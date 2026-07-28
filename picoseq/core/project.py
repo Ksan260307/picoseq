@@ -1,6 +1,6 @@
 """プロジェクト — アプリの全データを 1 つの不変オブジェクトで持つ。"""
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 from .constants import DEFAULT_SOUND, PART_COUNT, PATTERN_COUNT, steps_per_phrase
 from .music import DEFAULT_SCALE

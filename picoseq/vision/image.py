@@ -31,6 +31,7 @@ def load_rgb(path):
 
 
 def _decode_with_pillow(path):
+    """Pillow があれば任せる (JPEG など内蔵デコーダで読めない形式用)。"""
     try:
         from PIL import Image
     except ImportError:
@@ -47,6 +48,7 @@ def _decode_with_pillow(path):
 # ---- PPM (P6 バイナリ / P3 テキスト) ----
 
 def decode_ppm(data: bytes):
+    """PPM (P3 テキスト / P6 バイナリ) を (幅, 高さ, RGB) にする。"""
     tokens = _ppm_tokens(data)
     magic = next(tokens)
     width = int(next(tokens))
@@ -110,6 +112,7 @@ def _ppm_binary_offset(data: bytes) -> int:
 # ---- BMP (無圧縮 24/32bit) ----
 
 def decode_bmp(data: bytes):
+    """BMP (24/32bit 無圧縮) を (幅, 高さ, RGB) にする。"""
     if len(data) < 54:
         raise ValueError("BMP が短すぎます。")
     pixel_offset = struct.unpack_from("<I", data, 10)[0]
@@ -143,6 +146,7 @@ _PNG_CHANNELS = {0: 1, 2: 3, 3: 1, 6: 4}
 
 
 def decode_png(data: bytes):
+    """PNG (8bit グレー/RGB/RGBA・インタレースなし) を (幅, 高さ, RGB) にする。"""
     pos = 8
     width = height = None
     color_type = None
@@ -221,6 +225,7 @@ def _png_unfilter(raw: bytes, width: int, height: int, channels: int) -> list:
 
 
 def _paeth(a: int, b: int, c: int) -> int:
+    """PNG の Paeth 予測子 — a/b/c のうち予測値に最も近いものを返す。"""
     p = a + b - c
     pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
     if pa <= pb and pa <= pc:
