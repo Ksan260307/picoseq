@@ -64,6 +64,18 @@ def sound_labels() -> dict:
     return SOUND_LABELS[_lang]
 
 
+SOFT_LABELS = {
+    "ja": ("最強", "強", "弱", "最弱"),
+    "en": ("loudest", "loud", "soft", "softest"),
+}
+
+
+def soft_label(soft: int) -> str:
+    """強弱の段の表示名。範囲外は最強として扱う。"""
+    names = SOFT_LABELS[_lang]
+    return names[soft] if 0 <= soft < len(names) else names[0]
+
+
 def scale_label(scale_id: str, ja_label: str) -> str:
     """曲調ラベル。英語表示なら英訳、無ければ日本語ラベルへフォールバック。"""
     if _lang == "en":
@@ -244,8 +256,12 @@ STRINGS = {
                      "en": "Made with seed {seed} (progression {prog}). Like it? ★ Save pat.!"},
     "st_seed_reproduced": {"ja": "シード値 {seed} の曲を再現 (コード進行 {prog})。",
                            "en": "Reproduced seed {seed} (progression {prog})."},
-    "st_surprise": {"ja": "🎲 「{scale}」×「{sound}」×{bpm} BPM×シード値 {seed} (コード進行 {prog})！",
-                    "en": "🎲 \"{scale}\" × \"{sound}\" × {bpm} BPM × seed {seed} (progression {prog})!"},
+    "st_surprise": {"ja": "🎲 「{scale}」×{key}×「{sound}」×{beats}/4×{bpm} BPM×シード値 {seed} (コード進行 {prog})！",
+                    "en": "🎲 \"{scale}\" × {key} × \"{sound}\" × {beats}/4 × {bpm} BPM × seed {seed} (progression {prog})!"},
+    "st_soft_changed": {"ja": "この音の強さを「{level}」にしました (Shift+クリックで切り替え)。",
+                        "en": "Set this note to \"{level}\" (Shift+click to cycle)."},
+    "st_soft_no_note": {"ja": "音符がありません。Shift+クリックは置いてある音の強さを変えます。",
+                        "en": "No note here. Shift+click changes the strength of an existing note."},
     "st_no_melody": {
         "ja": "メロディがありません。メロディ (パート1) を置いてから「🎸 伴奏づけ」を押してください。",
         "en": "No melody. Place a melody (part 1), then press \"🎸 Add backing\"."},

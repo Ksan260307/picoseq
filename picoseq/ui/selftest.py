@@ -10,7 +10,7 @@ from pathlib import Path
 
 from ..core import actions
 from ..core import dj as dj_core
-from ..core.constants import PART_COUNT, WAVE_PULSE
+from ..core.constants import BEATS_MAX, BEATS_MIN, PART_COUNT, WAVE_PULSE
 from ..core.phrase import count_notes
 from ..core.project import layer_count, steps_of
 from ..core.serialize import dumps
@@ -38,6 +38,21 @@ class SelfTestMixin:
             assert count_notes(self.project.phrase) == 0
             self.undo_action()
             assert count_notes(self.project.phrase) == 1
+
+            # Shift+クリック: 音の強さが 1 段ずつ回り、一周して戻る
+            from ..core.note import SOFT_LEVELS, unpack_note
+            from ..core.phrase import active_notes as _active
+            slot = next(s for s, _ in _active(self.project.phrase))
+            assert unpack_note(self.project.phrase[slot]).soft == 0
+            for expect in list(range(1, SOFT_LEVELS)) + [0]:
+                self.roll_cycle_soft(60, 0)
+                assert unpack_note(self.project.phrase[slot]).soft == expect
+            self.roll_cycle_soft(72, 5)          # 音符が無い場所は案内を出すだけ
+            assert count_notes(self.project.phrase) == 1
+
+            self.roll_press(60, 2)  # 音符の中身クリック → 削除
+            assert count_notes(self.project.phrase) == 0
+            self.undo_action()
             self.redo_action()
             assert count_notes(self.project.phrase) == 0
 
@@ -394,13 +409,21 @@ class SelfTestMixin:
             self.generate_surprise()
             assert count_notes(self.project.phrase) > 0
             assert self.theme_sound == self.project.sound  # 配色と音色が一致
-            # テンポ・各パートの音色・長さもランダムに振れ、常に有効範囲に収まる
-            voicings, tempos = set(), set()
-            for _ in range(12):
+            # テンポ・拍子・各パートの音色・長さもランダムに振れ、常に有効範囲に収まる
+            # (拍子はソング構成が空のときだけ振れるので、先に空にしておく)
+            self.commit(actions.clear_song(self.project))
+            voicings, tempos, meters, keys = set(), set(), set(), set()
+            for _ in range(16):
                 self.generate_surprise()
                 assert SURPRISE_BPM[0] <= self.project.bpm <= SURPRISE_BPM[1]
                 assert self.bpm_var.get() == str(self.project.bpm)  # 表示も追従
+                assert BEATS_MIN <= self.project.beats <= BEATS_MAX
+                assert self.beats_box.current() + 2 == self.project.beats  # 表示も追従
+                assert 0 <= self.project.key <= 11
+                assert self.key_box.current() == self.project.key  # 表示も追従
                 tempos.add(self.project.bpm)
+                meters.add(self.project.beats)
+                keys.add(self.project.key)
                 for w in range(PART_COUNT):
                     for lyr in self.project.parts[w]:
                         assert 0 <= lyr.tone <= 100 and 25 <= lyr.gate <= 100
@@ -409,6 +432,22 @@ class SelfTestMixin:
                                    for lyr in self.project.parts[w]))
             assert len(voicings) > 1                        # 質感がランダムに変わる
             assert len(tempos) > 1                          # テンポもランダムに変わる
+            assert len(meters) > 1                          # 拍子もランダムに変わる
+            assert len(keys) > 1                            # キーもランダムに変わる
+
+            # 組み立て済みのソング構成があるときは拍子を振らない (黙って壊さない)
+            self.generate_auto()
+            self.save_current_pattern()
+            self.switch_tab("song")
+            self.song_click(0, 0)
+            assert used_blocks(self.project.song) > 0
+            kept_beats, kept_song = self.project.beats, self.project.song
+            for _ in range(8):
+                self.generate_surprise()
+                assert self.project.beats == kept_beats   # 拍子は据え置き
+                assert self.project.song == kept_song     # 構成も消えない
+            self.commit(actions.clear_song(self.project))
+            self.switch_tab("phrase")
             self.select_part(0)
 
             # MIDI 書き出しがフレーズ・ソングとも有効なバイト列を作る

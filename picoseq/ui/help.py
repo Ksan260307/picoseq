@@ -1,4 +1,4 @@
-"""ヘルプ画面 — 使い方・ショートカット・各機能の説明 (日英)。"""
+﻿"""ヘルプ画面 — 使い方・ショートカット・各機能の説明 (日英)。"""
 
 import tkinter as tk
 
@@ -14,6 +14,8 @@ SECTIONS_JA = [
         ("レイヤー", "各パートは「＋ 追加」で最大8層まで重ねられます。層ごとに音色・音を分けられ、自動作成も各層に音を入れます。"),
         ("質感・長さ・音量", "選んだパート (層) ごとに、音の質感 (明るさ・太さ)・長さ・音量を調整できます。"
                        "ヘッダーの「音色」は曲全体の音色セットで、こちらとは別物です。"),
+        ("音の強さ", "音符を Shift+クリックすると、その音の強さが 最強→強→弱→最弱→最強 と切り替わります。"
+                   "弱い音ほど暗く描かれ、再生・WAV・MIDI にも反映されます。"),
         ("移調・反転", "🔼🔽 (または Ctrl+↑↓) で 1 オクターブ上げ下げ。🔄 でフレーズを時間反転。"),
         ("パート消去", "パートのボタンを右クリックすると、そのパートの音だけを消せます。"),
     ]),
@@ -23,18 +25,27 @@ SECTIONS_JA = [
                     "作成後は使われたコード進行 (例: Am→F→C→G) が画面下に出ます。"),
         ("演奏スタイル", "シード値ごとにパートの演奏型が変わります。"
                     "リズム 208 種 (骨格 13 × 密度 4 × アクセント 4)、"
-                    "ベース 288 種 (動き 8 × 刻み 3 × 変化 6 × 音域 2)、"
-                    "伴奏 100 種 (取り方 5 × 置き方 4 × 長さ 5)、"
-                    "メロディのリズム 10 種を組み合わせます。"),
+                    "ベース 384 種 (動き 8 × 刻み 3 × 変化 8 × 音域 2)、"
+                    "伴奏 600 種 (取り方 5 × 置き方 4 × 変化 6 × 長さ 5)、"
+                    "メロディのリズム 10 種を組み合わせます。"
+                    "音程や長さを変える軸では刻みは増えないので、"
+                    "刻みの形そのものも リズム 52 / ベース 24 / 伴奏 22 通り用意しています。"),
         ("メロディの作り", "同じ音が続く回数に上限があり、どんなに疎なリズム型でも最低音数を保証します。"
                         "拍の頭はコードの音を守りつつ、裏拍には経過音を通すので、"
-                        "安全すぎない歌になります。"),
+                        "安全すぎない歌になります。ベースの動きも見ていて、"
+                        "土台と同じ向き・同じ音名へ進むのを避けます (反行)。"),
+        ("強弱", "音符ごとに 4 段の強さが付きます (小節頭 > 拍頭 > 裏拍 > 埋めの音)。"
+               "フレーズ最後の半小節はリズムが一段強くなり、次のループへの煽りになります。"
+               "ピアノロールでは弱い音ほど暗く描かれ、WAV と MIDI にも反映されます。"),
         ("曲調に合う演奏", "曲調の性格に合った演奏が 4 パートすべてで出やすくなります "
                       "(和風なら太鼓と薄い伴奏、ボス戦なら倍テンと 16 分ベース、幻想ならボサとパッド)。"
                       "絞り込みではなく重み付けなので、どの曲調でも全部の型が出る余地があります。"),
-        ("🎲 サプライズ", "曲調・音色・テンポ・シード値に加え、各パートの音色 (パルス幅など) と長さも"
+        ("🎲 サプライズ", "曲調・キー・音色・拍子・テンポ・シード値に加え、各パートの音色 (パルス幅など) と長さも"
                         "まるごとランダムに選んで一発生成します。65 種類の曲調から、質感まで思いがけない"
-                        "組み合わせに出会えます。"),
+                        "組み合わせに出会えます。テンポは曲調に合った範囲から選ばれます "
+                        "(激しい曲調なら速く、幻想なら遅く)。拍子はソング構成を組み立て済みのときは"
+                        "変わりません (ブロックの長さが変わると構成を作り直すことになるため)。"
+                        "どのキーでもメロディの音域は 2 オクターブで一定です。"),
         ("🎤 鼻歌から", "マイクに向かって歌う (または録音済み WAV を開く) と、声の高さを読み取って"
                       "メロディにします。そのあと「🎸 伴奏づけ」を押すと曲になります。"),
         ("🎸 伴奏づけ", "メロディ (パート1) だけを置いて押すと、その旋律に合うベース・リズム・サブを自動で付けます。"),
@@ -49,7 +60,9 @@ SECTIONS_JA = [
     ]),
     ("🎧 DJ モード", [
         ("回して流す", "▶ で開始すると、8 小節ごとに次のフレーズを自動生成して継ぎ目なく流し続けます"
-                     "(次ループを裏で先に用意し、ループの境目で滑らかに差し替え)。"),
+                     "(次ループを裏で先に用意し、ループの境目で滑らかに差し替え)。"
+                     "次のフレーズは候補をいくつか作って、今の音数に近いものを選びます — "
+                     "疎なフレーズの直後に密なフレーズが来て段差になるのを防ぎます。"),
         ("🔁 ループ固定", "チェックを入れると自動で進まず、現在のフレーズをループし続けます。"
                        "固定中はつまみを触ってもフレーズは変わりません (音作りだけが変わります)。"
                        "中央の「次のフレーズまで N 小節」表示で進行のタイミングが分かります。"),
@@ -65,7 +78,9 @@ SECTIONS_JA = [
                               "質感はメロディならパルス波のデューティ比 (細い電子音⇄太い矩形波)、長さはゲート (歯切れ⇄伸び)、音量はミックスのバランス。"
                               "ヘッダーの「音色」(音色セット) とは別のつまみです。音符は変えず音作りだけが変わります。"),
         ("ノイズ / フィルター / KILL", "ノイズや掃引フィルターで盛り上げ、KILL で各パートを即消音。タップでテンポ合わせ。"
-                                  "つまみはすべてデッキごとに独立し、その場で音に反映されます。"),
+                                  "つまみはすべてデッキごとに独立し、その場で音に反映されます。"
+                                  "ノイズは既にリズムが鳴っているステップを避けて刻みを足すので、"
+                                  "上げるほど「太くなる」のではなく「細かくなる」。"),
         ("🕘 履歴 / ★ お気に入り", "流したフレーズが新しい順に並びます。行の →A / →B で任意のデッキへ呼び戻し、"
                              "★ でお気に入り登録 (次回起動でも残ります)、💾 でパターンとして保存。"
                              "つまみを調整した状態も履歴に残るので、作り込む前へいつでも戻せます (クリアで掃除)。"
@@ -75,7 +90,10 @@ SECTIONS_JA = [
     ]),
     ("🧩 曲を組み立てる (ソング)", [
         ("ソング自動作成", "1 曲ぶんの構成 (イントロ→Aメロ→Bメロ→アウトロ) をワンボタンで作ります。"
-                         "パターン 1〜4 とソング構成が丸ごと入れ替わります。"),
+                         "パターン 1〜4 とソング構成が丸ごと入れ替わります。"
+                         "曲の設計図もシード値で選ばれます — 並び 6 種 (王道 / AABA / 交互 / "
+                         "B主体 / 長いイントロ / 畳みかけ) × イントロの厚み 3 種 × "
+                         "アウトロの余韻 3 種 = 54 通りです。"),
         ("配置する", "パレットでパターンを選ぶと「配置中」に名前が出ます。下のマス目に置きます。"
                    "横に連結・縦に重ねられます。マス目にはパターン名とブロック番号が出ます。"),
         ("消す", "同じマスをもう一度クリック、または右クリックで消去。"),
@@ -106,6 +124,8 @@ SECTIONS_EN = [
         ("Switch part", "The \"Part\" buttons, or keys 1-4. Four voices: Melody, Bass, Rhythm, Sub."),
         ("Layers", "Each part can stack up to 8 layers via \"＋ Add\". Layers get their own tone and notes, and Auto fills each one."),
         ("Tone / Length / Volume", "Adjust the brightness (tone), length and volume per selected part (layer). Volume balances the mix."),
+        ("Note strength", "Shift+click a note to cycle its strength: loudest → loud → soft → softest → loudest. "
+                          "Softer notes are drawn darker and carry into playback, WAV and MIDI."),
         ("Transpose / Reverse", "🔼🔽 (or Ctrl+↑↓) shift one octave. 🔄 reverses the phrase in time."),
         ("Clear a part", "Right-click a part button to erase just that part's notes."),
     ]),
@@ -115,9 +135,17 @@ SECTIONS_EN = [
                  "After generating, the chord progression used (e.g. Am→F→C→G) appears at the bottom."),
         ("How melodies are written", "Repeats of the same pitch are capped and a minimum note count is "
                                     "guaranteed even for the sparsest rhythms. Beat heads stay on chord "
-                                    "tones while off-beats let passing tones through, so it never sounds too safe."),
-        ("🎲 Surprise", "Randomly picks mood, sound, tempo and seed — plus each part's tone (pulse width, etc.) "
-                       "and length — all at once. Discover unexpected textures from 65 moods."),
+                                    "tones while off-beats let passing tones through, so it never sounds too safe. "
+                                    "The melody also watches the bass and favours contrary motion."),
+        ("Dynamics", "Every note carries one of four strengths (bar head > beat head > off-beat > ghost). "
+                     "The last half-bar of drums is pushed one level as a lead-in to the next loop. "
+                     "Softer notes are drawn darker in the piano roll, and it carries into WAV and MIDI."),
+        ("🎲 Surprise", "Randomly picks mood, key, sound, meter, tempo and seed — plus each part's tone "
+                       "(pulse width, etc.) and length — all at once. Discover unexpected textures from "
+                       "65 moods. The tempo comes from a range that fits the mood (fast for fierce scales, "
+                       "slow for dreamy ones). The meter is left alone once you have built a song, since "
+                       "changing it would reset the arrangement. The melody keeps the same two-octave "
+                       "span in every key."),
         ("🎤 From humming", "Sing into the mic (or open a recorded WAV) and it reads your pitch "
                           "into a melody. Then press \"🎸 Add backing\" to turn it into a song."),
         ("🎸 Add backing", "Place only a melody (part 1) and press it to auto-add matching bass, rhythm and sub."),
@@ -132,7 +160,9 @@ SECTIONS_EN = [
     ]),
     ("🎧 DJ mode", [
         ("Spin & flow", "Press ▶ and it auto-generates a new phrase every 8 bars and flows on with no gap "
-                        "(the next loop is pre-rendered and swapped in on the downbeat)."),
+                        "(the next loop is pre-rendered and swapped in on the downbeat). It drafts a few "
+                        "candidates and picks the one closest in note count to what is playing, so a sparse "
+                        "phrase is never followed by a wall of notes."),
         ("🔁 Hold", "Tick it to stop advancing and loop the current phrase instead. While held, "
                     "turning a knob only changes the sound — never the phrase. The centre shows "
                     "\"Next phrase in N bars\" so you can see the advance coming."),
@@ -148,7 +178,8 @@ SECTIONS_EN = [
                                      "Tone is the melody's pulse-wave duty cycle (thin blip ⇄ fat square); length is the gate (punchy ⇄ sustained); volume balances the mix. "
                                      "The notes stay the same, only the sound design changes."),
         ("Noise / Filter / KILL", "Add noise or sweep a filter to build energy; KILL instantly mutes a part. Tap sets tempo. "
-                                  "Every control is per-deck and applies immediately."),
+                                  "Every control is per-deck and applies immediately. Noise fills the gaps between "
+                                  "the existing drum hits, so turning it up makes the groove busier, not just louder."),
         ("🕘 History / ★ Favorites", "Every phrase you played, newest first. Use →A / →B on a row to recall it "
                                     "onto a deck, ★ to favorite it (kept between runs), 💾 to save it as a pattern. "
                                     "Control tweaks are logged too, so you can jump back before you dialed it in (Clear to tidy). "
@@ -158,7 +189,9 @@ SECTIONS_EN = [
     ]),
     ("🧩 Build a song", [
         ("Auto song", "Builds a full arrangement (Intro→A→B→Outro) with one button. "
-                      "Patterns 1-4 and the song are wholly replaced."),
+                      "Patterns 1-4 and the song are wholly replaced. The blueprint is picked by "
+                      "the seed as well — 6 arrangements × 3 intro thicknesses × 3 outro fades "
+                      "= 54 structures."),
         ("Place", "Pick a pattern from the palette — its name shows under \"Placing\" — and place it on the grid. "
                   "Chain horizontally, stack vertically. Cells show pattern names and block numbers."),
         ("Erase", "Click the same cell again, or right-click, to erase."),
@@ -185,6 +218,7 @@ SHORTCUTS_JA = [
     ("Space", "再生 / 停止"),
     ("Esc", "停止"),
     ("1〜4", "パート切替"),
+    ("Shift+クリック", "音の強さを切り替え"),
     ("Ctrl+Z / Y", "元に戻す / やり直す"),
     ("Ctrl+Tab", "フレーズ → パターン → ソング → DJ"),
     ("F1", "このヘルプ"),
@@ -194,6 +228,7 @@ SHORTCUTS_EN = [
     ("Space", "Play / Stop"),
     ("Esc", "Stop"),
     ("1-4", "Switch part"),
+    ("Shift+click", "Cycle note strength"),
     ("Ctrl+Z / Y", "Undo / Redo"),
     ("Ctrl+Tab", "Phrase → Patterns → Song → DJ"),
     ("F1", "This help"),

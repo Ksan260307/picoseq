@@ -30,7 +30,7 @@ from .constants import (
 )
 from .constants import CUSTOM_SCALE_MIN, DEFAULT_SOUND, SOUND_SETS
 from .music import DEFAULT_SCALE, PHOTO_SCALE, SCALES, get_scale
-from .note import Note, is_active, unpack_note
+from .note import SOFT_LEVELS, Note, is_active, unpack_note
 from .phrase import active_notes, build_phrase
 from .project import PartParams, Pattern, Project
 from .song import EMPTY_SONG
@@ -73,7 +73,14 @@ def dumps(project: Project) -> str:
 
 
 def _notes_to_json(buffer: tuple) -> list:
-    return [[n.pitch, n.step, n.wave, n.dur, n.layer] for _, n in active_notes(buffer)]
+    """音符を配列にする。強弱が無い音符は 5 要素のまま (旧版でもそのまま読める)。"""
+    out = []
+    for _, n in active_notes(buffer):
+        item = [n.pitch, n.step, n.wave, n.dur, n.layer]
+        if n.soft:
+            item.append(n.soft)
+        out.append(item)
+    return out
 
 
 # ---- 復号 ----
@@ -190,7 +197,8 @@ def _name_from_json(value) -> str:
     return " ".join(value.split())[:PATTERN_NAME_MAX]
 
 
-def _valid_note(pitch: int, step: int, wave: int, dur: int, layer: int = 0):
+def _valid_note(pitch: int, step: int, wave: int, dur: int, layer: int = 0,
+                soft: int = 0):
     """範囲内なら Note、範囲外なら None。dur はグリッド内に収める。"""
     if not (PITCH_MIN <= pitch <= PITCH_MAX):
         return None
@@ -200,19 +208,27 @@ def _valid_note(pitch: int, step: int, wave: int, dur: int, layer: int = 0):
         return None
     if not (0 <= layer < MAX_LAYERS):
         layer = 0
-    return Note(pitch, step, wave, clamp(dur, 1, 255), layer)
+    if not (0 <= soft < SOFT_LEVELS):
+        soft = 0                       # 壊れた値は「そのままの音量」に寄せる
+    return Note(pitch, step, wave, clamp(dur, 1, 255), layer, soft)
 
 
 def _notes_list_from_json(raw) -> list:
-    """音符リストを Note の列にする。4 要素 (旧) は layer=0、5 要素は layer 付き。"""
+    """音符リストを Note の列にする。
+
+    4 要素 (旧) は layer=0、5 要素は layer 付き、6 要素 (schema 8 以降) は
+    強弱 (soft) 付き。足りない要素は 0 = 「そのままの音量」で補うので、
+    旧データの音は変わらない。
+    """
     notes = []
     if isinstance(raw, list):
         for item in raw:
-            if not (isinstance(item, list) and len(item) in (4, 5)
+            if not (isinstance(item, list) and len(item) in (4, 5, 6)
                     and all(isinstance(v, int) and not isinstance(v, bool) for v in item)):
                 continue
-            layer = item[4] if len(item) == 5 else 0
-            note = _valid_note(item[0], item[1], item[2], item[3], layer)
+            layer = item[4] if len(item) >= 5 else 0
+            soft = item[5] if len(item) >= 6 else 0
+            note = _valid_note(item[0], item[1], item[2], item[3], layer, soft)
             if note is not None:
                 notes.append(note)
     return notes

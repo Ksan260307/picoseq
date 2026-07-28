@@ -1,4 +1,4 @@
-"""自動作成のテスト — 決定論と音楽的な不変条件。"""
+﻿"""自動作成のテスト — 決定論と音楽的な不変条件。"""
 
 import unittest
 
@@ -83,24 +83,31 @@ class TestDeterminism(unittest.TestCase):
     def test_chosen_progression_drives_bass_roots(self):
         """表示用の chosen_progression が、実際の曲のベース根音と一致する。
 
-        自動作成のベースは各半小節でコードの根音を土台にするので、
-        小節頭のベース音のクラスは進行の各コードの根音クラスに一致する。
+        和音の変わり目 (半小節ごと) のベースは多くが根音になる。全部ではない —
+        動きの途中なら 5 度や 3 度から入ることもあり、それは転回形として自然。
+        特定のシードに頼らず、多数のシードでの割合として見る。
         """
         from picoseq.core.composer import chosen_progression
         from picoseq.core.music import chord_at
         from picoseq.core.constants import WAVE_TRIANGLE
 
-        beats, key, scale, seed = 4, 0, "minor", 7
-        prog = chosen_progression(scale, seed)
-        half = beats * 2  # 半小節のステップ数
-        buf = compose(beats, key, scale, seed)
-        bass = {n.step: n for _, n in active_notes(buf) if n.wave == WAVE_TRIANGLE}
-        # 各半小節の頭のベース (存在すれば) は、その区画のコード根音クラス
-        for window in range(4):
-            step = window * half
-            if step in bass:
-                chord = chord_at(key, scale, step, beats, prog)
-                self.assertEqual(bass[step].pitch % 12, chord.root % 12)
+        beats, key = 4, 0
+        half = beats * 2  # 半小節のステップ数 = 和音の変わり目
+        on_root = total = 0
+        for scale in ("major", "minor", "dorian"):
+            for seed in range(1, 41):
+                prog = chosen_progression(scale, seed)
+                buf = compose(beats, key, scale, seed)
+                bass = {n.step: n for _, n in active_notes(buf)
+                        if n.wave == WAVE_TRIANGLE}
+                for window in range(4):
+                    step = window * half
+                    if step not in bass:
+                        continue
+                    chord = chord_at(key, scale, step, beats, prog)
+                    total += 1
+                    on_root += bass[step].pitch % 12 == chord.root % 12
+        self.assertGreater(on_root / total, 0.6)
 
     def test_chosen_progression_respects_explicit(self):
         from picoseq.core.composer import chosen_progression
@@ -202,7 +209,7 @@ class TestStyles(unittest.TestCase):
         counts = (BASS_STYLES, BACKING_STYLES, DRUM_STYLES, MELODY_RHYTHMS, MOTIF_MODES)
         # 型が 200 種規模あるので、全部を引くにはシードを多めに回す必要がある
         # (クーポンコレクター: 208 種なら平均 208*ln208 ≈ 1100 回)
-        for seed in range(1, 6000):
+        for seed in range(1, 12000):
             rng = Rng(seed)
             for i, count in enumerate(counts):
                 seen[i].add(rng.next_int(count))
@@ -210,7 +217,7 @@ class TestStyles(unittest.TestCase):
             self.assertEqual(len(chosen), count)
 
     def test_style_combinations_expanded(self):
-        """リズム・ベースが 200 種規模、組み合わせは 2,800 万通り超。"""
+        """リズム・ベース・伴奏が数百種規模、組み合わせは 20 億通り超。"""
         from picoseq.core.composer import (
             BACKING_STYLES,
             BASS_STYLES,
@@ -220,10 +227,10 @@ class TestStyles(unittest.TestCase):
         )
         combos = (BASS_STYLES * BACKING_STYLES * DRUM_STYLES
                   * MELODY_RHYTHMS * MOTIF_MODES)
-        self.assertGreaterEqual(combos, 350000000)
+        self.assertGreaterEqual(combos, 2800000000)
         self.assertGreaterEqual(DRUM_STYLES, 200)   # リズムを最重点で増やした
-        self.assertGreaterEqual(BASS_STYLES, 280)
-        self.assertGreaterEqual(BACKING_STYLES, 100)
+        self.assertGreaterEqual(BASS_STYLES, 380)     # 変化軸を 6→8 にして 288→384
+        self.assertGreaterEqual(BACKING_STYLES, 500)  # 変化軸を足して 100→600
         self.assertGreaterEqual(MELODY_RHYTHMS, 10)
         self.assertGreaterEqual(MOTIF_MODES, 6)
 
@@ -237,7 +244,7 @@ class TestDrumPatterns(unittest.TestCase):
         from picoseq.core.prng import Rng
         steps = steps if steps is not None else beats * 4 * MEASURES
         out = []
-        _compose_drums(None, lambda p, s, w, d: out.append((s, d)),
+        _compose_drums(None, lambda p, s, w, d, sf=0: out.append((s, d)),
                        Rng(seed), beats, scale, steps, style)
         return out
 
@@ -324,7 +331,7 @@ class TestBassPatterns(unittest.TestCase):
         from picoseq.core.prng import Rng
         steps = beats * 4 * MEASURES
         out = []
-        _compose_bass(None, lambda p, s, w, d: out.append((p, s, d)),
+        _compose_bass(None, lambda p, s, w, d, sf=0: out.append((p, s, d)),
                       Rng(seed), beats, scale, steps,
                       lambda s: chord_at(0, "major", s, beats, (0, 3, 1, 4), None),
                       style)
@@ -343,6 +350,35 @@ class TestBassPatterns(unittest.TestCase):
             BASS_STYLES,
             BASS_MOTION_COUNT * BASS_RHYTHM_COUNT * BASS_VARIATION_COUNT
             * BASS_REGISTER_COUNT)
+
+    def test_rhythm_shapes_are_not_just_the_subdivisions(self):
+        """**刻みの形**が刻みの数 (3) より十分多いこと。
+
+        動き (音程) と音域をいくら増やしても刻みは増えない。刻みの形が少ないと
+        別シードでも同じ土台に聞こえる (変化軸を 6→8 にして 18→24 種)。
+        """
+        from picoseq.core.composer import BASS_RHYTHM_COUNT, BASS_STYLES
+        onset_shapes = {frozenset(step for _, step, _ in self._notes(style))
+                        for style in range(BASS_STYLES)}
+        self.assertGreaterEqual(len(onset_shapes), BASS_RHYTHM_COUNT * 8,
+                                "ベースの刻みの形が刻みの数から増えていない")
+
+    def test_no_variation_collapses_to_the_bar_heads(self):
+        """どの変化も小節頭だけには潰れない。
+
+        小節頭は必ず打つ仕様なので、そこまで減ると 8 種の動きが全部
+        「根音 1 発」になり、別スタイルが同じ音符列になってしまう。
+        """
+        from picoseq.core.composer import (
+            BASS_REGISTER_COUNT, BASS_RHYTHM_COUNT, BASS_VARIATION_COUNT,
+        )
+        for rhythm in range(BASS_RHYTHM_COUNT):
+            for variation in range(BASS_VARIATION_COUNT):
+                style = ((rhythm * BASS_VARIATION_COUNT + variation)
+                         * BASS_REGISTER_COUNT)
+                steps = {step for _, step, _ in self._notes(style)}
+                with self.subTest(rhythm=rhythm, variation=variation):
+                    self.assertGreater(len(steps), 2, "小節頭だけに潰れている")
 
     def test_subdivisions_divide_the_bar_evenly(self):
         """刻みは小節を割り切る (拍から浮くポリリズムを土台に使わない)。"""
@@ -430,14 +466,14 @@ class TestBassPatterns(unittest.TestCase):
 
 
 class TestBackingPatterns(unittest.TestCase):
-    """伴奏も軸の直積 — 取り方 × 置き方 × 長さ。"""
+    """伴奏も軸の直積 — 取り方 × 置き方 × 変化 × 長さ。"""
 
     def _notes(self, style, scale="major", beats=4, seed=42):
         from picoseq.core.composer import _compose_backing
         from picoseq.core.music import chord_at
         from picoseq.core.prng import Rng
         out = []
-        _compose_backing(None, lambda p, s, w, d: out.append((p, s, d)),
+        _compose_backing(None, lambda p, s, w, d, sf=0: out.append((p, s, d)),
                          Rng(seed), scale, beats * 4 * 2,
                          lambda s: chord_at(0, "major", s, beats, (0, 3, 1, 4), None),
                          style, beats)
@@ -446,12 +482,54 @@ class TestBackingPatterns(unittest.TestCase):
     def test_declared_count_is_the_axis_product(self):
         from picoseq.core.composer import (
             BACKING_DUR_COUNT, BACKING_PLACEMENT_COUNT, BACKING_STYLES,
-            BACKING_VOICING_COUNT,
+            BACKING_VARIATION_COUNT, BACKING_VOICING_COUNT,
         )
         self.assertEqual(
             BACKING_STYLES,
-            BACKING_VOICING_COUNT * BACKING_PLACEMENT_COUNT * BACKING_DUR_COUNT)
-        self.assertGreaterEqual(BACKING_STYLES, 100)   # 旧 12 種から拡張
+            BACKING_VOICING_COUNT * BACKING_PLACEMENT_COUNT
+            * BACKING_VARIATION_COUNT * BACKING_DUR_COUNT)
+        self.assertGreaterEqual(BACKING_STYLES, 500)   # 旧 12 → 100 → 600 種
+
+    def test_rhythm_shapes_are_not_just_the_placements(self):
+        """**刻みの形**が置き方の数より十分多いこと。
+
+        取り方 (音程) や長さをいくら増やしても刻みは増えない。ここが置き方の数
+        (4) のままだと、別シードでも 4 回に 1 回は同じ刻みの伴奏になる。
+        """
+        from picoseq.core.composer import (
+            BACKING_PLACEMENT_COUNT, BACKING_STYLES,
+        )
+        onset_shapes = {frozenset(step for _, step, _ in self._notes(style))
+                        for style in range(BACKING_STYLES)}
+        self.assertGreater(len(onset_shapes), BACKING_PLACEMENT_COUNT * 4,
+                           "伴奏の刻みの形が置き方の数から増えていない")
+
+    def test_no_variation_is_a_no_op_on_any_placement(self):
+        """変化はどの置き方に当てても必ず何かを変える。
+
+        位置を決め打ちで足し引きする実装だと、その位置を元から叩く置き方
+        (8 分刻みなど) で完全な無操作になる。刻みが変わらない場合でも、
+        少なくとも鳴る音 (先取りの和音) は変わっていなければならない。
+        """
+        from picoseq.core.composer import (
+            BACKING_DUR_COUNT, BACKING_PLACEMENT_COUNT,
+            BACKING_VARIATION_COUNT,
+        )
+
+        def played(placement, variation):
+            style = ((placement * BACKING_VARIATION_COUNT + variation)
+                     * BACKING_DUR_COUNT)
+            notes = self._notes(style)
+            return frozenset(step for _, step, _ in notes), tuple(notes)
+
+        for variation in range(1, BACKING_VARIATION_COUNT):
+            for placement in range(BACKING_PLACEMENT_COUNT):
+                onsets, notes = played(placement, variation)
+                base_onsets, base_notes = played(placement, 0)
+                with self.subTest(placement=placement, variation=variation):
+                    self.assertTrue(
+                        onsets != base_onsets or notes != base_notes,
+                        f"変化 {variation} が置き方 {placement} で無操作")
 
     def test_every_pattern_is_distinct(self):
         from picoseq.core.composer import BACKING_STYLES
@@ -497,7 +575,7 @@ class TestDrumDensity(unittest.TestCase):
         from picoseq.core.composer import _compose_drums
         from picoseq.core.prng import Rng
         out = []
-        _compose_drums(None, lambda p, s, w, d: out.append(s),
+        _compose_drums(None, lambda p, s, w, d, sf=0: out.append(s),
                        Rng(42), 4, "major", 32, style)
         return out
 
@@ -513,6 +591,197 @@ class TestDrumDensity(unittest.TestCase):
         from picoseq.core.composer import _DRUM_FILL
         self.assertLessEqual(max(_DRUM_FILL), 0.7)
         self.assertEqual(min(_DRUM_FILL), 0.0)      # 芯だけの型も残す
+
+
+class TestDynamics(unittest.TestCase):
+    """音符ごとの強弱 — 長さだけのアクセントでは音量が平坦になる。"""
+
+    def _notes(self, scale_id="major", seed=1):
+        return [n for _, n in active_notes(compose(4, 0, scale_id, seed))]
+
+    def test_every_part_uses_more_than_one_level(self):
+        """4 パートとも強弱の段が 2 つ以上出る (平坦なパートを作らない)。"""
+        from collections import defaultdict
+        levels = defaultdict(set)
+        for scale_id in SCALE_IDS[:8]:
+            for seed in range(1, 9):
+                for note in self._notes(scale_id, seed):
+                    levels[note.wave].add(note.soft)
+        for wave in (WAVE_PULSE, WAVE_TRIANGLE, WAVE_NOISE, WAVE_SAW):
+            with self.subTest(wave=wave):
+                self.assertGreater(len(levels[wave]), 1)
+
+    def test_bar_heads_are_the_strongest(self):
+        """小節頭は必ず最強の段 (拍の階層が耳に伝わる)。"""
+        for scale_id in SCALE_IDS[:12]:
+            for seed in range(1, 9):
+                for note in self._notes(scale_id, seed):
+                    if note.step % 16 == 0 and note.wave != WAVE_SAW:
+                        with self.subTest(scale=scale_id, seed=seed):
+                            self.assertEqual(note.soft, 0)
+
+    def test_levels_stay_in_range(self):
+        from picoseq.core.note import SOFT_LEVELS
+        for scale_id in SCALE_IDS:
+            for seed in (2, 30):
+                for note in self._notes(scale_id, seed):
+                    self.assertTrue(0 <= note.soft < SOFT_LEVELS)
+
+    def test_offbeats_are_softer_than_beat_heads(self):
+        """裏拍の平均が拍頭より弱い (逆になっていない)。"""
+        import statistics
+        heads, offs = [], []
+        for scale_id in SCALE_IDS[:12]:
+            for seed in range(1, 13):
+                for note in self._notes(scale_id, seed):
+                    (heads if note.step % 4 == 0 else offs).append(note.soft)
+        self.assertLess(statistics.mean(heads), statistics.mean(offs))
+
+    def test_phrase_end_is_pushed(self):
+        """フレーズ最後の半小節のリズムは、同じ位置の前半より強い (煽り)。"""
+        import statistics
+        early, late = [], []
+        for scale_id in SCALE_IDS[:12]:
+            for seed in range(1, 13):
+                for note in self._notes(scale_id, seed):
+                    if note.wave != WAVE_NOISE:
+                        continue
+                    (late if note.step >= 24 else early).append(note.soft)
+        self.assertLess(statistics.mean(late), statistics.mean(early))
+
+    def test_dynamics_survive_save_and_load(self):
+        from picoseq.core import actions
+        from picoseq.core.project import new_project
+        from picoseq.core.serialize import dumps, loads
+        p = actions.generate_phrase(actions.set_seed(new_project(), 42))
+        self.assertTrue(any(n.soft for _, n in active_notes(p.phrase)))
+        self.assertEqual(loads(dumps(p)), p)
+
+    def test_dynamics_change_the_sound(self):
+        """強弱が実際に音量へ効く (無視されていない)。"""
+        from picoseq.core import renderer
+        from picoseq.core.note import Note
+        from picoseq.core.project import new_project
+        from picoseq.core.schedule import Event
+        p = new_project()
+        loud = renderer.render_events([Event(0, 60, 0, 4, 0, 0)], p.bpm, p.parts, 8)
+        quiet = renderer.render_events([Event(0, 60, 0, 4, 0, 3)], p.bpm, p.parts, 8)
+        self.assertGreater(max(map(abs, loud)), max(map(abs, quiet)))
+        self.assertGreater(max(map(abs, quiet)), 0)   # 消えてはいない
+
+
+class TestLayerComplement(unittest.TestCase):
+    """重ねるレイヤー — 下の層と同じ音を鳴らして「音量が上がるだけ」にしない。"""
+
+    def _part(self, wave, depth, scale_id="major", seed=1, beats=4):
+        from picoseq.core.composer import compose_layers
+        layers = [1, 1, 1, 1]
+        layers[wave] = depth
+        buffer = compose_layers(beats, 0, scale_id, seed, tuple(layers))
+        return [n for _, n in active_notes(buffer) if n.wave == wave]
+
+    def test_layers_never_duplicate_a_note(self):
+        """同じ (ステップ, 音程) が 2 回鳴らない。
+
+        以前はリズムで 2 層 59% / 4 層 74% が完全な重複だった
+        (リズムは音程が固定なので、重なると二重打ちになるだけ)。
+        """
+        for wave in (WAVE_PULSE, WAVE_TRIANGLE, WAVE_NOISE, WAVE_SAW):
+            for depth in (2, 4):
+                for seed in (1, 7, 42):
+                    notes = self._part(wave, depth, seed=seed)
+                    keys = [(n.step, n.pitch) for n in notes]
+                    with self.subTest(wave=wave, depth=depth, seed=seed):
+                        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_extra_layers_still_sound(self):
+        """重なりを避けても 2 層目が空にならない。"""
+        for wave in (WAVE_PULSE, WAVE_TRIANGLE, WAVE_NOISE, WAVE_SAW):
+            for scale_id in ("major", "minor", "japanese", "battle"):
+                notes = self._part(wave, 2, scale_id=scale_id, seed=9)
+                with self.subTest(wave=wave, scale=scale_id):
+                    self.assertTrue([n for n in notes if n.layer == 1])
+
+    def test_layers_stay_in_range(self):
+        """オクターブへ逃がしても音域と拍の外へ出ない。"""
+        from picoseq.core.constants import PITCH_MAX, PITCH_MIN
+        for beats in (2, 4, 7):
+            steps = steps_per_phrase(beats)
+            for wave in (WAVE_PULSE, WAVE_TRIANGLE, WAVE_NOISE, WAVE_SAW):
+                for n in self._part(wave, 3, beats=beats, seed=5):
+                    with self.subTest(beats=beats, wave=wave):
+                        self.assertTrue(PITCH_MIN <= n.pitch <= PITCH_MAX)
+                        self.assertTrue(0 <= n.step < steps)
+                        self.assertLessEqual(n.step + n.dur, steps)
+
+    def test_resolve_overlap_shifts_drums_in_time(self):
+        """リズムは音程が固定なので 16 分ずらす (ゴーストノート)。"""
+        from picoseq.core.composer import DRUM_PITCH, _resolve_overlap
+        taken = {(4, DRUM_PITCH)}
+        self.assertEqual(_resolve_overlap(taken, DRUM_PITCH, 4, WAVE_NOISE, 32),
+                         (DRUM_PITCH, 5))
+        taken.add((5, DRUM_PITCH))
+        self.assertEqual(_resolve_overlap(taken, DRUM_PITCH, 4, WAVE_NOISE, 32),
+                         (DRUM_PITCH, 3))
+
+    def test_resolve_overlap_moves_pitched_parts_by_octave(self):
+        """音程を持つパートはオクターブへ逃がす (ユニゾン → オクターブ重ね)。"""
+        from picoseq.core.composer import _resolve_overlap
+        self.assertEqual(_resolve_overlap({(4, 60)}, 60, 4, WAVE_PULSE, 32),
+                         (72, 4))
+        self.assertEqual(
+            _resolve_overlap({(4, 60), (4, 72)}, 60, 4, WAVE_PULSE, 32), (48, 4))
+
+    def test_resolve_overlap_gives_up_when_full(self):
+        """逃げ場が無ければ捨てる (無理に鳴らして枠を壊さない)。"""
+        from picoseq.core.composer import DRUM_PITCH, _resolve_overlap
+        taken = {(s, DRUM_PITCH) for s in (0, 1)}
+        self.assertEqual(_resolve_overlap(taken, DRUM_PITCH, 0, WAVE_NOISE, 2),
+                         (None, None))
+
+    def test_resolve_overlap_passes_through_when_free(self):
+        from picoseq.core.composer import _resolve_overlap
+        self.assertEqual(_resolve_overlap(set(), 60, 4, WAVE_PULSE, 32), (60, 4))
+
+    def test_layers_are_deterministic(self):
+        from picoseq.core.composer import compose_layers
+        for seed in (3, 77):
+            self.assertEqual(compose_layers(4, 0, "minor", seed, (2, 2, 2, 2)),
+                             compose_layers(4, 0, "minor", seed, (2, 2, 2, 2)))
+
+
+class TestBackingMinimum(unittest.TestCase):
+    """間引きの下限 — 伴奏が「和音として聞こえない」ほど減らない。"""
+
+    def test_thinning_keeps_a_minimum(self):
+        """和風の間引きでも BACKING_MIN_NOTES 音は残る。
+
+        パッド + 先取り + 和風の間引きが重なると 32 ステップ中 1 音まで
+        減っていた (パート自体が消えるケースもあった)。
+        """
+        from picoseq.core.composer import (
+            BACKING_MIN_NOTES, BACKING_STYLES, _compose_backing,
+        )
+        from picoseq.core.music import chord_at
+        from picoseq.core.prng import Rng
+        for style in range(0, BACKING_STYLES, 3):
+            for seed in (1, 5, 9):
+                out = []
+                _compose_backing(
+                    None, lambda p, s, w, d, sf=0: out.append(s), Rng(seed),
+                    "japanese", 32,
+                    lambda s: chord_at(0, "japanese", s, 4, (0, 3, 1, 4)),
+                    style, 4)
+                with self.subTest(style=style, seed=seed):
+                    self.assertGreaterEqual(len(out), BACKING_MIN_NOTES)
+
+    def test_generated_phrases_have_audible_backing(self):
+        for scale_id in SCALE_IDS:
+            for seed in range(1, 9):
+                notes = [n for _, n in active_notes(compose(4, 0, scale_id, seed))
+                         if n.wave == WAVE_SAW]
+                with self.subTest(scale=scale_id, seed=seed):
+                    self.assertGreaterEqual(len(notes), 3)
 
 
 class TestMelodyQuality(unittest.TestCase):
@@ -584,6 +853,37 @@ class TestMelodyQuality(unittest.TestCase):
         from picoseq.core.composer import _step_away
         from picoseq.core.music import chord_at
         self.assertEqual(_step_away([60], 0, chord_at(0, "major", 0, 4)), 0)
+
+    def test_range_does_not_shrink_in_high_keys(self):
+        """使える音域がキーに依らず一定。
+
+        「主音の 1 オクターブ上から上限まで」だと床だけがキーとともに上がり、
+        天井は動かないので高いキーで幅が潰れる (実測で C 24 半音 / B 13 半音)。
+        """
+        from picoseq.core.composer import MELODY_SPAN
+        self.assertGreaterEqual(MELODY_SPAN, 24)
+        for key in range(12):
+            lowest = 999
+            highest = 0
+            for scale_id in SCALE_IDS[:12]:
+                for seed in range(1, 9):
+                    for note in self._melody(key=key, scale_id=scale_id,
+                                             seed=seed):
+                        lowest = min(lowest, note.pitch)
+                        highest = max(highest, note.pitch)
+            with self.subTest(key=key):
+                # 22 = MELODY_SPAN(24) − 端の音を引き当てない分の許容。
+                # 定数を閾値に使うと、定数を戻したときに閾値ごと動いて検出できない。
+                self.assertGreaterEqual(highest - lowest, 22)
+
+    def test_note_count_holds_in_every_key(self):
+        for key in range(12):
+            for scale_id in ("major", "minor", "japanese", "battle"):
+                for seed in (1, 13):
+                    with self.subTest(key=key, scale=scale_id, seed=seed):
+                        melody = self._melody(key=key, scale_id=scale_id,
+                                              seed=seed)
+                        self.assertGreaterEqual(len(melody), 4)
 
     def test_minimum_note_count(self):
         """疎なリズム型・間を活かす音階でも「メロディの無いフレーズ」を作らない。"""
@@ -669,6 +969,60 @@ class TestMelodyQuality(unittest.TestCase):
                     steps += 1
                     leaps += abs(a.pitch - b.pitch) > 7
         self.assertLess(leaps / steps, 0.15)
+
+    def _motion(self, scales=("major", "minor", "dorian", "lydian"), seeds=20):
+        """メロディとベースの動き方 (斜行, 並行, 反行, 並行オクターブ, 総数)。"""
+        oblique = parallel = contrary = octaves = total = 0
+        for scale_id in scales:
+            for seed in range(1, seeds + 1):
+                notes = [n for _, n in active_notes(compose(4, 0, scale_id, seed))]
+                mel = sorted((n for n in notes if n.wave == WAVE_PULSE),
+                             key=lambda n: n.step)
+                bass = sorted((n for n in notes if n.wave == WAVE_TRIANGLE),
+                              key=lambda n: n.step)
+
+                def under(step):
+                    found = None
+                    for b in bass:
+                        if b.step <= step < b.step + b.dur:
+                            found = b
+                    return found
+
+                prev = None
+                for note in mel:
+                    low = under(note.step)
+                    if low is None:
+                        continue
+                    cur = (note.pitch, low.pitch - 12)  # ベースは 1 オクターブ下
+                    if prev:
+                        dm, db = cur[0] - prev[0], cur[1] - prev[1]
+                        total += 1
+                        if dm == 0 or db == 0:
+                            oblique += 1
+                        elif (dm > 0) == (db > 0):
+                            parallel += 1
+                            if (cur[0] - cur[1]) % 12 == 0 == (prev[0] - prev[1]) % 12:
+                                octaves += 1
+                        else:
+                            contrary += 1
+                    prev = cur
+        return oblique, parallel, contrary, octaves, total
+
+    def test_contrary_motion_is_common(self):
+        """ベースと逆方向に動く割合が十分ある (声部が 1 つに聞こえない)。"""
+        _, parallel, contrary, _, total = self._motion()
+        self.assertGreater(contrary / total, 0.28)
+        self.assertGreater(contrary, parallel)
+
+    def test_parallel_octaves_are_rare(self):
+        """連続する並行オクターブはまれ。
+
+        対策前は 4.0%。ここで見ている 4 つの全音階は根音が重なりやすく、
+        65 曲調をならすと 1.4% 程度に下がる。減点を強めても 1.3% 止まりで、
+        これ以上は「土台と同じ音名を絶対に踏まない」に近づいて旋律が窮屈になる。
+        """
+        _, _, _, octaves, total = self._motion()
+        self.assertLess(octaves / total, 0.03)
 
     def test_melody_quality_is_deterministic(self):
         """歌わせ方の制約を足しても「同じシード → 同じ曲」は保たれる。"""

@@ -13,6 +13,7 @@
 from array import array
 
 from .constants import DEFAULT_SOUND, SAMPLE_RATE
+from .note import soft_gain
 from .project import Project
 from .schedule import (
     phrase_events,
@@ -91,7 +92,9 @@ def _render_events_python(events, bpm, parts, total_ticks, rate, wrap,
         part = _layer_params(parts, event.wave, event.layer)
         voice = _cached_voice(event.wave, event.pitch, event.dur * spt,
                               part.tone, part.gate, rate, sound)
-        vol = part.volume
+        # 音符ごとの強弱 × パートの音量。声のキャッシュは弱さを含めないので
+        # (段が 4 つあるだけでキャッシュが 4 倍になる)、掛けるのはここで行う。
+        vol = part.volume * soft_gain(event.soft) // 100
         start = event.tick * spt
         if wrap:
             for i, value in enumerate(voice):
@@ -116,9 +119,10 @@ def _render_events_numpy(events, bpm, parts, total_ticks, rate, wrap,
         if not voice:
             continue
         varr = _np.asarray(voice, dtype=_np.int64)
-        if part.volume != 100:
+        vol = part.volume * soft_gain(event.soft) // 100
+        if vol != 100:
             # 純 Python 経路と同じ切り捨て (負値は下方向) になるよう // を使う
-            varr = varr * part.volume // 100
+            varr = varr * vol // 100
         start = event.tick * spt
         if wrap:
             _add_wrapped(mix, varr, start, loop_len)

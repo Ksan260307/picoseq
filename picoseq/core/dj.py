@@ -13,6 +13,8 @@ from .prng import Rng
 NOISE_LAYER = 0
 NOISE_PITCH = 55           # ノイズは音程に依存しないので任意 (表示・整合用の固定値)
 NOISE_MAX_LEVEL = 4
+NOISE_SOFT = 1             # 刻みの強さ (note.SOFT_GAIN の段)。芯より一段弱く
+NOISE_ROLL_SOFT = 0        # 盛り上げロールは煽りなので最強で出す
 
 # レベルごとの刻み間隔 (ステップ): 小さいほど密。
 _GAP = (4, 2, 2, 1)
@@ -22,6 +24,12 @@ def add_noise(notes, beats: int, level: int, seed: int) -> list:
     """音符列 (Note の並び) にノイズの刻みと盛り上げロールを足した新しい列を返す。
 
     level 0 なら素通し。1〜4 で密度が上がり、2 以上では最後にロール (追い込み) が入る。
+
+    **既に打っているステップは避ける**。ノイズは合成時に音程を無視するので
+    (`render_voice(NOISE, 55, …)` と `(NOISE, 60, …)` は完全に同じ波形)、
+    同じステップへ重ねても「まったく同じ音が 2 回鳴る = 音量が上がるだけ」で
+    刻みは増えない。実測では レベル1 で足したノイズの 75% がこの無駄打ちだった。
+    ずらし先は 16 分後ろ (裏で鳴らす)。そこも埋まっていれば置かない。
     """
     result = list(notes)
     level = clamp(int(level), 0, NOISE_MAX_LEVEL)
@@ -42,11 +50,48 @@ def add_noise(notes, beats: int, level: int, seed: int) -> list:
         for step in range(steps - roll_len, steps):
             hit_steps.add(step)
 
+    roll_from = steps - min(steps, 4 * level) if level >= 2 else steps
+    taken = {n.step for n in result if n.wave == WAVE_NOISE}
     for step in sorted(hit_steps):
         if len(result) >= MAX_NOTES:
             break
-        result.append(Note(NOISE_PITCH, step, WAVE_NOISE, 1, NOISE_LAYER))
+        if step in taken:
+            step += 1                    # 16 分後ろの裏へ逃がす
+            if step >= steps or step in taken:
+                continue
+        taken.add(step)
+        # 刻みは芯より一段弱く (ハイハット相当)。ロールだけは煽りとして強く出す。
+        soft = NOISE_ROLL_SOFT if step >= roll_from else NOISE_SOFT
+        result.append(Note(NOISE_PITCH, step, WAVE_NOISE, 1, NOISE_LAYER, soft))
     return result
+
+
+# 連続フローでの音数の許容差。8 小節ごとに次のフレーズへ移るとき、疎なフレーズの
+# 直後に密なフレーズが来ると段差になる (実測で音数差 median 13 / max 44)。
+FLOW_DENSITY_TOLERANCE = 12
+
+
+def pick_flow_seed(candidates, count_of, previous):
+    """次のフレーズのシードを候補から選ぶ。前フレーズと音数が近いものを優先する。
+
+    candidates は候補シードの並び (呼び出し側が乱数で作る)。count_of(seed) は
+    そのシードのフレーズの音数。previous が None (最初のフレーズ) なら先頭を返す。
+    許容差内の候補が複数あれば**候補の並び順で最初のもの**を採る — 乱数を消費せず、
+    候補の並びが同じなら結果も同じになる (決定論)。
+    """
+    seeds = list(candidates)
+    if not seeds:
+        raise ValueError("候補が空です")
+    if previous is None:
+        return seeds[0]
+    best = None
+    for seed in seeds:
+        gap = abs(count_of(seed) - previous)
+        if gap <= FLOW_DENSITY_TOLERANCE:
+            return seed
+        if best is None or gap < best[0]:
+            best = (gap, seed)
+    return best[1]   # 全部が許容外なら一番近いもの
 
 
 FILTER_OPEN = 100   # これ以上は素通し (フィルターなし)

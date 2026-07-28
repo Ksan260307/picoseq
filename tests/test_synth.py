@@ -22,11 +22,12 @@ from picoseq.core.synth import (
     voice_samples,
 )
 
+# パートごとのピーク音量 (PEAKS) を実測 RMS で釣り合わせ直した後の波形。
 GOLDEN_VOICE_CRC = {
-    WAVE_PULSE: 132701679,
-    WAVE_TRIANGLE: 71178892,   # 擬似ベース強調 (倍音を重ねて可聴化) 後の波形
-    WAVE_NOISE: 3794188056,
-    WAVE_SAW: 3051989150,
+    WAVE_PULSE: 3039640967,
+    WAVE_TRIANGLE: 3219326059,  # 擬似ベース強調 (倍音を重ねて可聴化) 後の波形
+    WAVE_NOISE: 157465462,
+    WAVE_SAW: 4004919461,
 }
 
 
@@ -153,6 +154,95 @@ class TestRenderVoice(unittest.TestCase):
             with self.subTest(wave=wave):
                 voice = render_voice(wave, 60, 5512, 50, 80)
                 self.assertGreater(max(map(abs, voice)), PEAKS[wave] // 4)
+
+
+class TestMixBalance(unittest.TestCase):
+    """4 パートを混ぜたときの釣り合い — 実測 RMS で見る。
+
+    ピーク値 (PEAKS) をそのまま音量と思うと外す。ベースは低音の倍音構成で
+    実効エネルギーが大きく、伴奏は 2 段減衰で早く落ちるため、
+    「ピークは 1/3 なのに聞こえ方は 1/4」のようなずれが出る。
+    """
+
+    def _phrases(self, count=8):
+        from picoseq.core import actions
+        from picoseq.core.music import SCALE_IDS
+        from picoseq.core.project import new_project
+        out = []
+        for i in range(count):
+            p = actions.set_scale(new_project(), SCALE_IDS[i % len(SCALE_IDS)])
+            out.append(actions.generate_phrase(actions.set_seed(p, i + 1)))
+        return out
+
+    def _rms(self, pcm):
+        from array import array
+        values = array("h")
+        values.frombytes(pcm)
+        return (sum(v * v for v in values) / len(values)) ** 0.5
+
+    def _part_rms(self, project, wave):
+        from picoseq.core.renderer import render_phrase
+        others = {(w, 0) for w in range(4) if w != wave}
+        return self._rms(render_phrase(project, mute=others))
+
+    def test_no_part_is_buried(self):
+        """どのパートもメロディの 0.4 倍以上で鳴る (和音が消えない)。
+
+        伴奏はかつて 0.37 倍で、刻みの型を 6 倍に増やしても聞こえなかった。
+        """
+        import statistics
+        phrases = self._phrases()
+        melody = statistics.median(self._part_rms(p, WAVE_PULSE) for p in phrases)
+        for wave in (WAVE_TRIANGLE, WAVE_NOISE, WAVE_SAW):
+            part = statistics.median(self._part_rms(p, wave) for p in phrases)
+            with self.subTest(wave=wave):
+                self.assertGreater(part, melody * 0.4,
+                                   f"パート {wave} がミックスで埋もれている")
+
+    def test_no_part_dominates(self):
+        """どのパートもメロディの 2 倍を超えない (主役が埋もれない)。"""
+        import statistics
+        phrases = self._phrases()
+        melody = statistics.median(self._part_rms(p, WAVE_PULSE) for p in phrases)
+        for wave in (WAVE_TRIANGLE, WAVE_NOISE, WAVE_SAW):
+            part = statistics.median(self._part_rms(p, wave) for p in phrases)
+            with self.subTest(wave=wave):
+                self.assertLess(part, melody * 2.0)
+
+    # 旧配分 (ベース 0.30 / 伴奏 0.10) で実際に 16bit の上限へ達していた組み合わせ。
+    # 無作為な標本では 100 フレーズに 1 つしか出ないので、現物を固定して見張る。
+    CLIPPED_CASES = (("pentatonic", 9), ("wholetone", 20), ("battle", 8),
+                     ("battle", 12), ("battle", 20), ("phrygian", 20))
+
+    def _peak(self, scale_id, seed):
+        from array import array
+
+        from picoseq.core import actions
+        from picoseq.core.project import new_project
+        from picoseq.core.renderer import render_phrase
+        p = actions.set_scale(new_project(), scale_id)
+        p = actions.generate_phrase(actions.set_seed(p, seed))
+        values = array("h")
+        values.frombytes(render_phrase(p))
+        return max(max(values), -min(values))
+
+    def test_mix_does_not_clip(self):
+        """4 パートの立ち上がりが重なっても 16bit の上限に触れない。"""
+        for scale_id, seed in self.CLIPPED_CASES:
+            with self.subTest(scale=scale_id, seed=seed):
+                self.assertLess(self._peak(scale_id, seed), 32767,
+                                "ミックスが上限に達している")
+
+    def test_mix_does_not_clip_in_a_wide_sample(self):
+        from picoseq.core.music import SCALE_IDS
+        for scale_id in SCALE_IDS[:12]:
+            for seed in (3, 9, 20):
+                with self.subTest(scale=scale_id, seed=seed):
+                    self.assertLess(self._peak(scale_id, seed), 32767)
+
+    def test_peak_budget_leaves_headroom(self):
+        """ピークの総和が上限の 8 割以内 (重なりの余地を残す)。"""
+        self.assertLess(sum(PEAKS.values()), 32767 * 0.8)
 
     def test_tone_changes_pulse_duty(self):
         thin = render_voice(WAVE_PULSE, 60, 5512, 0, 80)

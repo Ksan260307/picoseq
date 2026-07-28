@@ -25,7 +25,8 @@ from ..core.wavio import wav_bytes
 from . import i18n, storage, theme
 from .i18n import t
 from .tuning import (
-    DJ_ADVANCE_LOOPS, DJ_HISTORY_COMMIT_MS, DJ_RENDER_DEBOUNCE_MS, DJ_SCRATCH_MS,
+    DJ_ADVANCE_LOOPS, DJ_FLOW_CANDIDATES, DJ_HISTORY_COMMIT_MS,
+    DJ_RENDER_DEBOUNCE_MS, DJ_SCRATCH_MS,
 )
 
 
@@ -147,9 +148,27 @@ class DJMixin:
         self._dj_apply_now = immediate
         self._dj_schedule_render()
 
+    def _dj_flow_seed(self):
+        """次フレーズのシードを選ぶ。候補を数本引き、今の音数に近いものを採る。
+
+        完全な乱数だと疎なフレーズの直後に密なフレーズが来て段差になる
+        (実測で音数差 median 13 / max 44)。候補づくりは乱数、選ぶのは決定論。
+        """
+        candidates = [random.randint(SEED_MIN, SEED_MAX)
+                      for _ in range(DJ_FLOW_CANDIDATES)]
+        current = count_notes(self.project.phrase) if self.project else None
+        counts = {}
+
+        def count_of(seed):
+            if seed not in counts:
+                counts[seed] = count_notes(self._dj_project_for(seed).phrase)
+            return counts[seed]
+
+        return dj_core.pick_flow_seed(candidates, count_of, current)
+
     def _dj_prepare_auto(self):
-        """継続フロー用に、新しいランダムシードで次フレーズを仕込む (継ぎ目で乗り換え)。"""
-        self._dj_want_seed = random.randint(SEED_MIN, SEED_MAX)
+        """継続フロー用に、次フレーズを仕込む (継ぎ目で乗り換え)。"""
+        self._dj_want_seed = self._dj_flow_seed()
         self._dj_apply_now = False
         self._dj_schedule_render()
 

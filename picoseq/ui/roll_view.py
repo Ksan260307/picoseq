@@ -8,6 +8,7 @@ import tkinter as tk
 
 from ..core.constants import PITCH_MAX, PITCH_MIN
 from ..core.music import in_scale, note_name
+from ..core.note import soft_gain
 from ..core.phrase import active_notes
 from ..core.project import steps_of
 from . import theme
@@ -51,6 +52,7 @@ class RollView:
         self.frame.columnconfigure(0, weight=1)
 
         self.canvas.bind("<Button-1>", self._on_press)
+        self.canvas.bind("<Shift-Button-1>", self._on_shift_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.canvas.bind("<Button-3>", self._on_right_press)
@@ -209,6 +211,9 @@ class RollView:
                 base = theme.PART_COLORS[note.wave]
                 is_muted = (note.wave, note.layer) in muted
                 fill = theme.dim(base, 40) if is_muted else base
+                if not is_muted and note.soft:
+                    # 弱い音は暗く描く (自動作成が付けた強弱を目で追えるように)
+                    fill = theme.dim(fill, soft_gain(note.soft))
                 self._draw_note(note, steps, fill, theme.PLAYHEAD)
         canvas.tag_raise(self.hover_item)
         canvas.tag_raise(self.playhead_item)
@@ -272,6 +277,13 @@ class RollView:
         if self.drag_slot != -1:
             self.drag_slot = -1
             self.app.roll_release()
+
+    def _on_shift_press(self, event):
+        """Shift+クリックで強弱を 1 段回す (置く/消すとは別操作)。"""
+        zone, pitch, step = self._locate(event)
+        if zone == "grid":
+            self.app.roll_cycle_soft(pitch, step)
+        return "break"      # 通常のクリック (置く) を走らせない
 
     def _on_right_press(self, event):
         zone, pitch, step = self._locate(event)

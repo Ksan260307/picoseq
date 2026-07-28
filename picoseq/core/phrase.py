@@ -34,7 +34,8 @@ def resize_note(buffer: tuple, slot: int, dur: int) -> tuple:
     note = unpack_note(buffer[slot])
     dur = max(1, min(dur, 255))
     return replace_slot(buffer, slot,
-                        pack_note(note.pitch, note.step, note.wave, dur, layer=note.layer))
+                        pack_note(note.pitch, note.step, note.wave, dur,
+                                  layer=note.layer, soft=note.soft))
 
 
 def find_note_at(buffer: tuple, pitch: int, step: int, wave: int, layer: int = 0) -> int:
@@ -79,7 +80,9 @@ def count_notes(buffer: tuple) -> int:
 
 def build_phrase(notes) -> tuple:
     """Note の列からバッファを作る (先頭から順に詰める)。あふれた分は捨てる。"""
-    values = [pack_note(n.pitch, n.step, n.wave, n.dur, layer=getattr(n, "layer", 0))
+    values = [pack_note(n.pitch, n.step, n.wave, n.dur,
+                        layer=getattr(n, "layer", 0),
+                        soft=getattr(n, "soft", 0))
               for n in notes[:MAX_NOTES]]
     values += [0] * (MAX_NOTES - len(values))
     return tuple(values)

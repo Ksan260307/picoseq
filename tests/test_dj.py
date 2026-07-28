@@ -66,6 +66,61 @@ class TestAddNoise(unittest.TestCase):
         high = dj.add_noise([], 4, 99, 3)   # 4 に丸められる
         self.assertEqual(low, high)
 
+    def test_never_doubles_an_existing_hit(self):
+        """既に打っているステップへは重ねない。
+
+        ノイズは合成時に音程を無視するので、同じステップに 2 音あると
+        まったく同じ波形が 2 回鳴るだけ (実測でレベル 1 の 75% が無駄打ちだった)。
+        """
+        for level in range(1, dj.NOISE_MAX_LEVEL + 1):
+            for seed in (1, 42, 999):
+                base = [Note(dj.NOISE_PITCH, s, WAVE_NOISE, 1)
+                        for s in range(0, 32, 4)]
+                out = _noise_notes(dj.add_noise(base, 4, level, seed))
+                steps = [n.step for n in out]
+                with self.subTest(level=level, seed=seed):
+                    self.assertEqual(len(steps), len(set(steps)))
+
+    def test_shifted_hits_stay_in_the_grid(self):
+        base = [Note(dj.NOISE_PITCH, s, WAVE_NOISE, 1) for s in range(32)]
+        out = _noise_notes(dj.add_noise(base, 4, 4, 7))
+        self.assertEqual(len(out), 32)      # 全部埋まっていれば足せない
+        for note in out:
+            self.assertTrue(0 <= note.step < 32)
+
+    def test_added_hits_are_softer_than_the_core(self):
+        """刻みは芯より一段弱く、ロールだけは煽りとして強い。"""
+        out = dj.add_noise([], 4, 4, 11)
+        softs = {n.soft for n in _noise_notes(out)}
+        self.assertIn(dj.NOISE_SOFT, softs)
+        self.assertIn(dj.NOISE_ROLL_SOFT, softs)
+        self.assertLess(dj.NOISE_ROLL_SOFT, dj.NOISE_SOFT)
+
+
+class TestFlowSeed(unittest.TestCase):
+    """連続フローのシード選び — 疎なフレーズの直後に密なフレーズを置かない。"""
+
+    def test_picks_the_closest_density(self):
+        counts = {1: 10, 2: 50, 3: 30}
+        self.assertEqual(dj.pick_flow_seed([2, 3, 1], counts.get, 12), 1)
+
+    def test_returns_the_first_within_tolerance(self):
+        counts = {1: 40, 2: 45, 3: 44}
+        # 45 は許容差 (12) の内側なので、そこで打ち切って候補順の先頭を採る
+        self.assertEqual(dj.pick_flow_seed([2, 3, 1], counts.get, 44), 2)
+
+    def test_first_phrase_takes_the_first_candidate(self):
+        self.assertEqual(dj.pick_flow_seed([7, 8], lambda s: 0, None), 7)
+
+    def test_is_deterministic(self):
+        counts = {1: 10, 2: 50, 3: 30}
+        for _ in range(5):
+            self.assertEqual(dj.pick_flow_seed([1, 2, 3], counts.get, 28), 3)
+
+    def test_empty_candidates_raise(self):
+        with self.assertRaises(ValueError):
+            dj.pick_flow_seed([], lambda s: 0, 10)
+
 
 class TestLowpass(unittest.TestCase):
     def _hf_signal(self, n=2000, amp=20000):

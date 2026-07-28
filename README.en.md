@@ -1,4 +1,4 @@
-# PicoSeq — Retro Chiptune Sequencer
+﻿# PicoSeq — Retro Chiptune Sequencer
 
 A desktop app for making and playing 8-bit style chiptune music.
 Place notes on a grid to build a song — or start from a photo or your own humming.
@@ -10,7 +10,10 @@ Place notes on a grid to build a song — or start from a photo or your own humm
 - Draw phrases on a grid, then arrange them into a full song
 - Four parts (melody / bass / rhythm / sub)
 - **🧅 Layers per part** — stack up to 8 layers per part via "＋ Add". Give each layer its own
-  tone and notes for harmonies and thickness; ✨ Auto fills every layer too (up to 32 voices)
+  tone and notes for harmonies and thickness; ✨ Auto fills every layer too (up to 32 voices).
+  Stacked layers never play the same note at the same step as a layer below — that would only
+  raise the volume instead of adding anything, so drums shift by a 16th (ghost notes) and pitched
+  parts move an octave (unison becomes octave doubling)
 - **🔇 Mute (per part or per layer)** — toggle mute for a whole part or an individual layer;
   applies to playback and WAV export (never changes the saved state)
 - **🔍 Zoom the board** — zoom the piano roll in/out (the － / ＋ in its header, or Ctrl+wheel);
@@ -24,35 +27,60 @@ Place notes on a grid to build a song — or start from a photo or your own humm
   Japanese scales (in-sen, ryukyu, …) / blues, jazz, whole-tone, diminished / world scales
   (Persian, Arabic, Hungarian, …) and more (plus photo-derived scales)
 - **✨ Auto-compose** — one-click composition. Keep the "seed value" to recreate the exact same tune anytime.
-  Chord progressions (500–4,000 per mood, **~120,000 total**) × **288 bass** × **100 backing** ×
-  **208 drum** × 10 melody-rhythm × 6 development styles (**350,000,000+ playing-style combos alone**)
+  Chord progressions (500–4,000 per mood, **~120,000 total**) × **384 bass** × **600 backing** ×
+  **208 drum** × 10 melody-rhythm × 6 development styles (**2,800,000,000+ playing-style combos alone**)
   combine, so every seed sounds different. Progressions are generated from functional harmony
   (tonic / subdominant / dominant) with substitute chords; the one used (e.g. Am→F→C→G) is shown after generating
-- **🥁 208 drums / 288 bass / 100 backing patterns** — not hand-written one by one, but built from the
+- **🥁 208 drums / 384 bass / 600 backing patterns** — not hand-written one by one, but built from the
   product of musically meaningful axes (the same idea as the chord progressions).
   - Drums = **13 skeletons** (rock / eighths / triplet / backbeat / half-time / offbeat / clave /
     bossa nova / amen / gallop / tribal / drum'n'bass / stutter) × **4 densities** (airy ⇄ packed)
     × **4 accent schemes**
   - Bass = **8 motions** (pedal / root-fifth / walking / arpeggio / octave / chromatic / run / third)
-    × **3 subdivisions** (half-bar / quarter / eighth) × **6 variations** (straight / syncopated /
-    dotted / grace / two-bar / build-up) × **2 registers** (deep foundation / an octave up)
+    × **3 subdivisions** (half-bar / quarter / eighth) × **8 variations** (straight / syncopated /
+    dotted / grace / two-bar / build-up / anticipation / second-half shift)
+    × **2 registers** (deep foundation / an octave up)
   - Backing = **5 voicings** (root / third / fifth / arpeggio up & down) × **4 placements**
-    (beats / offbeats / eighths / pad) × **5 lengths** (short stabs ⇄ long sustain)
+    (beats / offbeats / eighths / pad) × **6 variations** (straight / syncopated / anticipation /
+    two-bar / build-up / laid-back) × **5 lengths** (short stabs ⇄ long sustain)
   - Densities span very sparse to packed, so you can build and drop energy
+  - **What the numbers mean**: the pattern count and the number of distinct *rhythms* are two
+    different things. Axes that change pitch or note length (accents, motions, registers, voicings)
+    add patterns but not rhythms, so each part has its own rhythm-shaping axes.
+    Distinct rhythms: **52 drum / 24 bass / 22 backing**. Backing originally had 100 patterns but
+    only the 4 placements as rhythms — one pair of seeds in four shared the exact same comp rhythm
+    (the variation axis took it to 22, dropping that from 25% to 4.6%)
 - **🎵 Melodies are written to be singable** — quality, not just quantity. Repeats of the same
   pitch are capped (no melody that gets stuck on one note), a minimum note count is guaranteed
   even for the sparsest rhythm types (never a phrase with no melody), and while beat heads stay
-  on chord tones, off-beats let **passing tones** through (so it never sounds too safe)
+  on chord tones, off-beats let **passing tones** through (so it never sounds too safe).
+  The melody also **watches the bass and favours contrary motion**, avoiding moves in the same
+  direction or onto the same pitch class, so the two voices rarely collapse into one
+- **🔊 Per-note dynamics** — accents are struck with **volume**, not just length: four levels
+  (bar head › beat head › off-beat › ghost note) give every phrase a metric hierarchy, and the
+  last half-bar of drums is pushed one level as a lead-in to the next loop. Dynamics show up as
+  note brightness in the piano roll and carry into both the WAV and the MIDI velocities
 - **🎯 The whole arrangement matches the mood** — the scale's own interval content decides its character
   (11 families: bright / lyrical / exotic / blues / dreamy / pentatonic-folk / fierce …) and the styles
   that suit it become **more likely across all four parts** (drums, bass, backing and melody).
   e.g. Japanese → taiko feels with sparse backing, Boss battle → double-time & drum'n'bass with
   16th-note bass, dreamy → bossa with pads. Nothing is forbidden, so **any pattern can still appear
   in any mood** — character without losing surprise
-- **🎲 Surprise me** — randomizes mood, sound set, **tempo** and seed, **plus each part's tone (pulse width,
-  etc.) and length**, for a one-click reveal — so even the texture is an unexpected combination from all 65 moods
+- **🎲 Surprise me** — randomizes mood, **key**, sound set, **meter**, **tempo** and seed, **plus each part's
+  tone (pulse width, etc.) and length**, for a one-click reveal — so even the texture is an unexpected
+  combination from all 65 moods
+  - **The melody keeps the same two-octave span in every key.** Deriving the range from the tonic alone
+    squeezes it against the pitch ceiling in high keys — halving it — so the floor is bounded
+  - **The tempo comes from a range that fits the mood** — 150–180 for fierce scales, 80–105 for dreamy
+    ones, and so on. Matching the playing styles to the mood is pointless if the tempo fights it,
+    so each of the 11 character families carries its own range
+  - **The meter is drawn from 2/4–7/4** too (weighted toward 4/4). It is left alone once you have built
+    a song, since changing it would have to reset the arrangement
 - **🎼 Auto-song** — generates a whole Intro → A → B → Outro song structure in one click
-  (each pattern gets a default name: Intro / A / B / Outro)
+  (each pattern gets a default name: Intro / A / B / Outro).
+  **The blueprint is chosen by the seed too** — 6 arrangements (classic / AABA / alternating /
+  B-driven / long intro / relentless) × 3 intro thicknesses × 3 outro fades = **54 structures**.
+  A and B come from different seeds and different progressions, so they always contrast
 - **🎧 DJ mode** — two big turntables for real-time jamming. Press ▶ and it **auto-generates a new
   phrase every 8 bars and flows on seamlessly** (pre-rendered and swapped in on the downbeat), and you
   can **drag a disc to scratch**. Crossfade between decks, build energy with **noise / filter / KILL**,

@@ -12,6 +12,7 @@ Tick(16分音符) を PPQ 基準の MIDI 時間に変換する。整数演算の
 import struct
 
 from .constants import WAVE_NOISE, WAVE_PULSE, WAVE_SAW, WAVE_TRIANGLE
+from .note import soft_gain
 from .schedule import phrase_events, phrase_ticks, song_events, song_ticks
 
 PPQ = 96                      # 4分音符あたりの MIDI tick
@@ -55,7 +56,8 @@ def midi_bytes(events, bpm: int) -> bytes:
             note = DRUM_NOTE
         else:
             note = _clamp_note(event.pitch + _PITCH_ADJUST.get(event.wave, 0))
-        velocity = _VELOCITY[event.wave]
+        # 音符ごとの強弱をベロシティへ移す (書き出した MIDI にも起伏が残る)
+        velocity = max(1, _VELOCITY[event.wave] * soft_gain(event.soft) // 100)
         start = event.tick * TICKS_PER_STEP
         end = (event.tick + event.dur) * TICKS_PER_STEP
         raw.append((start, 1, channel, note, velocity))

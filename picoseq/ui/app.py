@@ -48,7 +48,7 @@ from ..core.serialize import LoadError, dumps, loads
 from ..core.song import used_blocks
 from ..core.wavio import wav_bytes
 from . import i18n, storage, theme
-from .i18n import t
+from .i18n import soft_label, t
 from .help import HelpDialog
 from .panel import DockPanel
 from .dj_view import DJView
@@ -60,7 +60,7 @@ from .dj_control import DJMixin
 from .flowbar import FlowBar
 from .flowbar import group as flow_group
 from .selftest import SelfTestMixin
-from .tuning import LIVE_DEBOUNCE_MS, SURPRISE_BPM
+from .tuning import LIVE_DEBOUNCE_MS, SURPRISE_BEATS, surprise_bpm
 from .roll_view import RollView
 from .song_view import SongView
 
@@ -895,6 +895,16 @@ class PicoSeqApp(DJMixin, SelfTestMixin):
         if slot != -1:
             self.commit(actions.erase_note(self.project, slot))
 
+    def roll_cycle_soft(self, pitch, step):
+        """Shift+クリック — その音符の強弱を 1 段回す。"""
+        slot = find_note_at(self.project.phrase, pitch, step, self.part, self.layer)
+        if slot == -1:
+            self.set_status(t("st_soft_no_note"))
+            return
+        project, soft = actions.cycle_note_soft(self.project, slot)
+        self.commit(project)
+        self.set_status(t("st_soft_changed", level=soft_label(soft)))
+
     def select_part(self, part):
         self.part = part
         self.layer = min(self.layer, layer_count(self.project, part) - 1)
@@ -1046,19 +1056,26 @@ class PicoSeqApp(DJMixin, SelfTestMixin):
                           prog=self._progression_text()))
 
     def generate_surprise(self):
-        """サプライズ — 曲調・音色・テンポ・シードに加え、各パートの音色・長さも丸ごとランダムに。
+        """サプライズ — 曲調・キー・音色・拍子・テンポ・シードに加え、各パートの音色・長さも振る。
 
         65 種類の曲調から思いがけない組み合わせに出会うための一発ボタン。
-        テンポも、パートごとの音色 (パルス幅など) と長さ (ゲート) も振るので、毎回別物になる。
+        テンポは曲調の性格に合った範囲から選ぶ (ボス戦が 80 BPM にならないように)。
+        拍子はソング構成が空のときだけ振る — 拍子を変えるとブロック長が変わり
+        構成をリセットせざるを得ないので、組み立て済みの曲を黙って壊さない。
         """
+        from ..core.music import scale_family
         scale = random.choice(SCALE_IDS)
         sound = random.choice(theme.SOUND_IDS)
-        bpm = random.randint(*SURPRISE_BPM)
+        key = random.randrange(len(KEY_NAMES))
+        bpm = random.randint(*surprise_bpm(scale_family(scale)))
         seed = random.randint(SEED_MIN, SEED_MAX)
         p = self.project
         # フォト音階は写真が要るので通常の曲調から選ぶ (SCALE_IDS は通常のみ)
         p = actions.set_scale(p, scale)
+        p = actions.set_key(p, key)
         p = actions.set_sound(p, sound)
+        if used_blocks(p.song) == 0:
+            p = actions.set_beats(p, random.choice(SURPRISE_BEATS))
         p = actions.set_bpm(p, bpm)
         p = actions.set_seed(p, seed)
         p = actions.generate_phrase(p)
@@ -1068,7 +1085,8 @@ class PicoSeqApp(DJMixin, SelfTestMixin):
         from ..core.music import SCALES as _SCALES
         self.set_status(t("st_surprise",
                           scale=i18n.scale_label(scale, _SCALES[scale]["label"]),
-                          sound=i18n.sound_label(sound), bpm=bpm, seed=seed,
+                          sound=i18n.sound_label(sound), key=KEY_NAMES[key],
+                          beats=p.beats, bpm=bpm, seed=seed,
                           prog=self._progression_text()))
 
     @staticmethod

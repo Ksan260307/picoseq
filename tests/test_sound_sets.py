@@ -24,11 +24,12 @@ class TestSoundSets(unittest.TestCase):
     def test_default_matches_golden(self):
         """既定の retro8 の各波形を回帰検査する。
 
-        メロディ(0)/リズム(2)/サブ(3) は音色セット導入前とビット単位で同じ。
-        ベース(1=三角波) だけは、低音が小型スピーカーで聞こえないため倍音を重ねて
-        可聴化した (擬似ベース強調) ので、意図的に旧版と異なる。
+        値は tests/test_synth.py の GOLDEN_VOICE_CRC と同じ (音を変える変更は
+        両方を更新する)。旧版とのビット互換は既に手放している:
+        ベース(1) は倍音を重ねて可聴化し (擬似ベース強調)、
+        その後 4 パートの音量配分を実測 RMS で釣り合わせ直したため全波形が変わった。
         """
-        golden = {0: 132701679, 1: 71178892, 2: 3794188056, 3: 3051989150}
+        golden = {0: 3039640967, 1: 3219326059, 2: 157465462, 3: 4004919461}
         for wave, crc in golden.items():
             with self.subTest(wave=wave):
                 voice = render_voice(wave, 60, 5512, 50, 80)

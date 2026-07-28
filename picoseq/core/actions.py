@@ -177,7 +177,8 @@ def remove_layer(project: Project, wave: int, layer: int) -> Project:
         if note.wave == wave and note.layer == layer:
             continue
         if note.wave == wave and note.layer > layer:
-            kept.append(Note(note.pitch, note.step, note.wave, note.dur, note.layer - 1))
+            kept.append(Note(note.pitch, note.step, note.wave, note.dur,
+                             note.layer - 1, note.soft))
         else:
             kept.append(note)
     return update(project, parts=tuple(parts),
@@ -232,6 +233,30 @@ def resize_note(project: Project, slot: int, dur: int) -> Project:
     return update(project, phrase=phrase_ops.resize_note(project.phrase, slot, dur))
 
 
+def set_note_soft(project: Project, slot: int, soft: int) -> Project:
+    """スロットの音符の強弱を変える (0 = 最強 〜 SOFT_LEVELS-1)。"""
+    if not _valid_slot(project, slot):
+        return project
+    from .note import SOFT_LEVELS, pack_note, unpack_note
+    note = unpack_note(project.phrase[slot])
+    soft = clamp(int(soft), 0, SOFT_LEVELS - 1)
+    if soft == note.soft:
+        return project
+    value = pack_note(note.pitch, note.step, note.wave, note.dur,
+                      layer=note.layer, soft=soft)
+    return update(project, phrase=phrase_ops.replace_slot(project.phrase, slot,
+                                                          value))
+
+
+def cycle_note_soft(project: Project, slot: int):
+    """強弱を 1 段ずつ回す (最弱の次は最強へ)。(新 Project, 新しい段) を返す。"""
+    if not _valid_slot(project, slot):
+        return project, 0
+    from .note import SOFT_LEVELS, unpack_note
+    soft = (unpack_note(project.phrase[slot]).soft + 1) % SOFT_LEVELS
+    return set_note_soft(project, slot, soft), soft
+
+
 def _valid_slot(project: Project, slot: int) -> bool:
     from .note import is_active
     return 0 <= slot < len(project.phrase) and is_active(project.phrase[slot])
@@ -274,7 +299,8 @@ def transpose(project: Project, semitones: int) -> Project:
             continue
         pitch = note.pitch + semitones
         if PITCH_MIN <= pitch <= PITCH_MAX:
-            notes.append(Note(pitch, note.step, note.wave, note.dur, note.layer))
+            notes.append(Note(pitch, note.step, note.wave, note.dur,
+                              note.layer, note.soft))
             if semitones:
                 changed = True
         else:
@@ -296,7 +322,8 @@ def reverse_phrase(project: Project) -> Project:
         if start < 0:
             start = 0
         dur = min(note.dur, steps - start)
-        notes.append(Note(note.pitch, start, note.wave, dur, note.layer))
+        notes.append(Note(note.pitch, start, note.wave, dur, note.layer,
+                          note.soft))
     buffer = phrase_ops.build_phrase(notes)
     if buffer == project.phrase:
         return project

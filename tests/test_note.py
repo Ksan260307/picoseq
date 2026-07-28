@@ -2,7 +2,9 @@
 
 import unittest
 
-from picoseq.core.note import Note, is_active, pack_note, unpack_note
+from picoseq.core.note import (
+    SOFT_LEVELS, Note, is_active, pack_note, soft_gain, unpack_note,
+)
 
 
 class TestNotePack(unittest.TestCase):
@@ -43,8 +45,45 @@ class TestNotePack(unittest.TestCase):
         self.assertEqual(note.dur, 300 & 0xFF)
 
     def test_value_fits_in_32bit(self):
-        value = pack_note(255, 255, 3, 255)
+        value = pack_note(255, 255, 3, 255, layer=7, soft=3)
         self.assertTrue(0 <= value < 2 ** 32)
+
+
+class TestSoft(unittest.TestCase):
+    """音符ごとの強弱 — 空いていた 2bit に収め、0 を「そのまま」にする。"""
+
+    def test_roundtrip(self):
+        for soft in range(SOFT_LEVELS):
+            for layer in (0, 7):
+                with self.subTest(soft=soft, layer=layer):
+                    value = pack_note(60, 4, 1, 2, layer=layer, soft=soft)
+                    note = unpack_note(value)
+                    self.assertEqual(note.soft, soft)
+                    self.assertEqual(note.layer, layer)
+
+    def test_default_is_full_volume(self):
+        """既定 (0) は 100% — 強弱を持たない旧データの音を変えない。"""
+        self.assertEqual(Note(60, 0, 0, 1).soft, 0)
+        self.assertEqual(soft_gain(0), 100)
+        self.assertEqual(unpack_note(pack_note(60, 0, 0, 1)).soft, 0)
+
+    def test_old_packed_values_are_unchanged(self):
+        """レイヤーまでしか無い旧データ (bit30-31 = 0) は最強で読める。"""
+        legacy = pack_note(60, 4, 1, 2, layer=3) & 0x3FFFFFFF
+        self.assertEqual(unpack_note(legacy).soft, 0)
+
+    def test_levels_are_monotonic(self):
+        gains = [soft_gain(s) for s in range(SOFT_LEVELS)]
+        self.assertEqual(gains, sorted(gains, reverse=True))
+        self.assertEqual(gains[0], 100)
+        self.assertGreater(gains[-1], 0)      # 消えてはいけない
+
+    def test_out_of_range_is_full_volume(self):
+        self.assertEqual(soft_gain(-1), 100)
+        self.assertEqual(soft_gain(SOFT_LEVELS), 100)
+
+    def test_soft_is_masked(self):
+        self.assertEqual(unpack_note(pack_note(60, 0, 0, 1, soft=9)).soft, 9 & 0x3)
 
 
 if __name__ == "__main__":

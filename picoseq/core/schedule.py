@@ -18,6 +18,7 @@ class Event(NamedTuple):
     wave: int
     dur: int
     layer: int = 0
+    soft: int = 0     # 弱さ 0〜3 (0 = 最強)。音符から持ち越す
 
 
 def samples_per_tick(bpm: int, rate: int = SAMPLE_RATE) -> int:
@@ -47,7 +48,8 @@ def phrase_events(project: Project) -> list:
     events = []
     for _, note in active_notes(project.phrase):
         if note.step < steps:
-            events.append(Event(note.step, note.pitch, note.wave, note.dur, note.layer))
+            events.append(Event(note.step, note.pitch, note.wave, note.dur,
+                                note.layer, note.soft))
     events.sort()
     return events
 
@@ -68,6 +70,7 @@ def song_events(project: Project) -> list:
             for _, note in active_notes(pattern.notes):
                 if note.step < steps:
                     events.append(Event(block * steps + note.step, note.pitch,
-                                        note.wave, note.dur, note.layer))
+                                        note.wave, note.dur, note.layer,
+                                        note.soft))
     events.sort()
     return events

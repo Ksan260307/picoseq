@@ -4,14 +4,24 @@
 コード進行の上に ベース → サブ → リズム → メロディ の順で 4 パートを重ねる。
 
 パートごとに多数の「演奏スタイル」を用意し、シード値でその組み合わせを選ぶ。
-  ベース 288 種 × 伴奏 100 種 × リズム 208 種 × メロディのリズム 10 種 × 展開 6 種
-= 3.5 億通り超の下地に、各パートの音選びの乱数が乗る。
+  ベース 384 種 × 伴奏 600 種 × リズム 208 種 × メロディのリズム 10 種 × 展開 6 種
+= 28 億通り超の下地に、各パートの音選びの乱数が乗る。
 
 型が数百あるので 1 つずつ手書きせず**軸の直積**で組み立てる
 (コード進行を機能和声のひな型から自動生成しているのと同じ考え方)。
-  リズム = 骨格 13 × 密度 4 × アクセント 4        = 208 種 (実際に異なる形 200)
-  ベース = 動き 8 × 刻み 3 × 変化 6 × 音域 2      = 288 種 (実際に異なる形 288)
-  伴奏   = 取り方 5 × 置き方 4 × 長さ 5           = 100 種 (実際に異なる形 100)
+
+  | パート | 軸 | 型 | 音符列 | **リズム(発音位置)** |
+  |---|---|---|---|---|
+  | リズム | 骨格13 × 密度4 × アクセント4 | 208 | 200 | 52 |
+  | ベース | 動き8 × 刻み3 × 変化8 × 音域2 | 384 | 384 | 24 |
+  | 伴奏   | 取り方5 × 置き方4 × 変化6 × 長さ5 | 600 | 110 | 22 |
+
+**型の数とリズムの多様性は別物**。アクセントは音の長さ、動き/音域/取り方は音程を
+変えるだけなので、そこを増やしても刻みの形は増えない。「別シードでも同じ刻み」を
+減らしたいときはリズムに効く軸 (骨格・密度・置き方・変化) を増やすこと。
+  ・伴奏は当初 取り方×置き方×長さ = 100 型あったが、刻みの形は置き方の 4 通りだけ
+    だった → 60 シードの全ペアのうち **25% が伴奏の刻み完全一致**。
+    ベースと同じ「変化」軸を足して 22 通りにし、一致率は 4.6% まで下がった。
 
 軸が直交していれば型が潰れない。過去に踏んだ罠と対策:
   ・**数を稼ぐために音楽性を犠牲にしない**。ベースの刻みに 3/6 を混ぜると重複は
@@ -20,6 +30,9 @@
   ・密度の上限を上げすぎるとノイズ 1 声が「壁」になり骨格の差も埋もれる (上限 0.65)。
   ・アクセントを拍の位置だけで決めると、その位置を叩かない骨格で一度も効かない
     → 「何打目か」でも張るようにしてある。
+  ・**位置を決め打ちで足し引きする変化は、その位置を元から叩く型では何も起きない**
+    (伴奏の「追い込み」を 8 分刻みに当てたら完全な無操作だった)。
+    変化は置き方そのものを受け取って**変換する**形にしてある。
 
 メロディは型の数ではなく**歌えるか**で決まる。実測して見つかった罠 (_compose_melody):
   ・スコアが跳躍ペナルティだけだと「動かない」が跳躍 0 で常に最安になり、
@@ -58,6 +71,35 @@ MELODY_MIN_ONSETS = 3     # 1小節あたりの最低発音数 (疎な型でも�
 MELODY_RUN_LIMIT = 3      # 同じ音を続けて置ける上限
 MELODY_REPEAT_PENALTY = 6  # 同音が続くほど「留まる」を高くする係数
 MELODY_PASSING_PROB = 0.35  # 裏拍で経過音 (非コードトーン) を通す確率
+MELODY_SPAN = 24          # メロディに確保する音域の幅 (半音)。キーに依らず一定にする
+MOTIF_MIRROR_SPAN = 3     # ミラー展開で元の音から離れられる上限 (音階の度数)
+BACKING_MIN_NOTES = 3     # 間引いても伴奏に残す音数 (和音として聞こえる下限)
+MELODY_PARALLEL_PENALTY = 3  # ベースと同じ向きに動くことの減点 (反行を取る)
+MELODY_UNISON_PENALTY = 4    # ベースと同じ音名になることの減点 (並行オクターブ回避)
+
+# 音符ごとの強弱 (note.SOFT_GAIN の段。0 = 最強)。
+# これが無いと、アクセントは音の長さしか変えられず、フレーズの音量が平坦になる
+# (実測で 1小節目と2小節目の音量比 1.03 倍 = ほぼ起伏なし)。
+SOFT_ACCENT = 0   # アクセント・小節頭
+SOFT_CORE = 1     # 芯の打点・拍の頭
+SOFT_WEAK = 2     # 裏拍・経過音
+SOFT_GHOST = 3    # 埋めの音 (ゴーストノート)
+
+
+def _metric_soft(step, msteps, floor=SOFT_GHOST):
+    """拍の位置から弱さの段を決める。小節頭 > 拍頭 > 8分の裏 > 16分。
+
+    floor で下限 (最も弱くできる段) を絞る。土台や主旋律は落としすぎると
+    フレーズの芯が消えるので、パートごとに下限を変える。
+    """
+    pos = step % msteps
+    if pos == 0:
+        return SOFT_ACCENT
+    if pos % 4 == 0:
+        return min(SOFT_CORE, floor)
+    if pos % 2 == 0:
+        return min(SOFT_WEAK, floor)
+    return floor
 
 
 def compose(beats: int, key: int, scale_id: str, seed: int,
@@ -78,29 +120,69 @@ def compose_layers(beats: int, key: int, scale_id: str, seed: int,
     layer_counts は各パート (波形) のレイヤー数のタプル。
     レイヤー 0 は従来どおりの 4 パート。1 層目以降は、同じコード進行の上に
     別のシードで重ねる (旋律なら別のフレーズ、伴奏なら別のパターン)。
+
+    重ねる層は**下の層と同じ音を同じ位置で鳴らさない** (`_resolve_overlap`)。
+    層ごとに独立にパターンを選ぶだけだと、実測でリズムは 2 層で 59%・4 層で 74% が
+    完全な重複になり、音量が上がるだけで層を足した意味が無かった。
     """
     base = _compose_notes(beats, key, scale_id, seed, progression, custom,
                           with_melody=True)  # レイヤー 0 (全パート)
     notes = list(base)
     prog = chosen_progression(scale_id, seed, custom, progression)  # base と同じ進行
+    # 重なり判定はパート内だけで見る (別パートの同音は音色が違うので無駄にならない)
+    taken = {}
+    for note in base:
+        taken.setdefault(note.wave, set()).add((note.step, note.pitch))
     for wave in range(PART_COUNT):
         count = layer_counts[wave] if wave < len(layer_counts) else 1
         for layer in range(1, count):
             notes.extend(_compose_extra_layer(wave, layer, beats, key, scale_id,
-                                              seed, prog, custom))
+                                              seed, prog, custom,
+                                              taken.setdefault(wave, set())))
     return build_phrase(notes)
 
 
-def _compose_extra_layer(wave, layer, beats, key, scale_id, seed, prog, custom):
-    """1 パートの追加レイヤーを 1 つ作る。そのパートの音だけを返す。"""
+def _resolve_overlap(taken, pitch, step, wave, steps):
+    """下の層と完全に重なる音をずらす。(音程, ステップ) か (None, None) を返す。
+
+    重複はミックスでは「同じ音が少し大きくなる」だけで、層を足した甲斐がない。
+    リズムは音程が固定なので 16 分ずらして裏で鳴らし (ゴーストノート)、
+    音程を持つパートはオクターブへ逃がす (ユニゾン → オクターブ重ね)。
+    どちらも空いていなければ捨てる。
+    """
+    if (step, pitch) not in taken:
+        return pitch, step
+    if wave == WAVE_NOISE:
+        for alt in (step + 1, step - 1):
+            if 0 <= alt < steps and (alt, pitch) not in taken:
+                return pitch, alt
+    else:
+        for alt in (pitch + 12, pitch - 12):
+            if PITCH_MIN <= alt <= PITCH_MAX and (step, alt) not in taken:
+                return alt, step
+    return None, None
+
+
+def _compose_extra_layer(wave, layer, beats, key, scale_id, seed, prog, custom,
+                         taken=None):
+    """1 パートの追加レイヤーを 1 つ作る。そのパートの音だけを返す。
+
+    taken は同じパートの下の層が既に鳴らしている (ステップ, 音程)。
+    渡すと重なりを避け、避けた音はここへ足していく。
+    """
     rng = Rng((seed * 7919 + wave * 131 + layer * 977 + 12345) & 0xFFFFFFFF)
     steps = steps_per_phrase(beats)
     out = []
 
-    def emit(pitch, step, w, dur):
+    def emit(pitch, step, w, dur, soft=0):
+        if taken is not None:
+            pitch, step = _resolve_overlap(taken, pitch, step, wave, steps)
+            if pitch is None:
+                return
+            taken.add((step, pitch))
         dur = min(dur, steps - step)
         if PITCH_MIN <= pitch <= PITCH_MAX and dur >= 1:
-            out.append(Note(pitch, step, w, dur, layer))
+            out.append(Note(pitch, step, w, dur, layer, soft))
 
     def chord_of(step):
         return chord_at(key, scale_id, step, beats, prog, custom)
@@ -159,10 +241,10 @@ def _compose_notes(beats, key, scale_id, seed, progression, custom, with_melody)
     steps = steps_per_phrase(beats)
     notes = []
 
-    def emit(pitch, step, wave, dur):
+    def emit(pitch, step, wave, dur, soft=0):
         dur = min(dur, steps - step)
         if PITCH_MIN <= pitch <= PITCH_MAX and dur >= 1:
-            notes.append(Note(pitch, step, wave, dur))
+            notes.append(Note(pitch, step, wave, dur, 0, soft))
 
     # 進行が指定されていなければ、シード値でコード進行を 1 つ選ぶ
     progression = _pick_progression(rng, scale_id, custom, progression)
@@ -184,16 +266,39 @@ def _compose_notes(beats, key, scale_id, seed, progression, custom, with_melody)
                      beats)
     _compose_drums(notes, emit, rng, beats, scale_id, steps, drum_style)
     if with_melody:
+        # メロディはベースの動きを見て作る (反行を取り、並行オクターブを避ける)
         _compose_melody(notes, emit, rng, beats, key, scale_id, steps, chord_of,
-                        custom, melody_rhythm, motif_mode)
+                        custom, melody_rhythm, motif_mode,
+                        bass_at=_bass_lookup(notes))
     return notes
 
 
+def _bass_lookup(notes):
+    """step からその時点のベース音を引く関数を返す。無ければ None を返す。
+
+    メロディはベースの後に作るので、ここで土台の動きを参照できる。
+    """
+    line = sorted(((n.step, n.pitch) for n in notes if n.wave == WAVE_TRIANGLE))
+    if not line:
+        return None
+
+    def bass_at(step):
+        found = None
+        for start, pitch in line:
+            if start > step:
+                break
+            found = pitch
+        return found
+
+    return bass_at
+
+
 # ---- ベース (三角波) ---------------------------------------------------------
-# こちらも 3 軸の直積で組む: 動き 8 種 × 刻み 5 段 × 変化 5 種 = 200 種
-# ・動き … 音程の並び (ペダル/歩き/アルペジオ/半音…)
-# ・刻み … どの細かさで置くか (小節 → 16 分)
-# ・変化 … 置く位置のずらし方 (素直/シンコペ/付点/裏押し/跳ね)
+# 軸の直積で組む: 動き 8 × 刻み 3 × 変化 8 × 音域 2 = 384 種 (刻みの形は 24 種)
+# ・動き … 音程の並び (ペダル/歩き/アルペジオ/半音…)。刻みの形は変えない
+# ・刻み … どの細かさで置くか (半小節 / 4分 / 8分)
+# ・変化 … 置く位置のずらし方 (素直/シンコペ/付点/グレース/2小節/追い込み/先取り/後半ずらし)
+# ・音域 … 低音のまま / 1 オクターブ上。これも刻みの形は変えない
 
 def _bm_pedal(chord, i):
     """ペダル: 根音を保つ。"""
@@ -304,8 +409,32 @@ def _bv_altbar(step, pos, grid, msteps):
     return (step + max(1, grid // 2)) % grid == 0
 
 
+# 変化は「足す」「ずらす」だけにしてある。**間引く型は作らない** —
+# 小節頭は必ず打つ仕様なので、粗い刻み (半小節) を間引くと 1 和音 1 打まで減り、
+# 動き 8 種が全部「根音 1 発」に潰れて別スタイルが同じ音符列になる (実装して却下)。
+
+def _bv_anticipate(step, pos, grid, msteps):
+    """先取り: 小節の変わり目だけ 16 分早く入って次の和音を予告する。
+
+    小節末に 1 打足すだけなので、どの刻みでも素直な形と 1 打だけ違う。
+    """
+    if pos == msteps - 1:
+        return True
+    return step % grid == 0
+
+
+def _bv_halfshift(step, pos, grid, msteps):
+    """後半ずらし: 小節の後半だけ刻みを半分ずらす (前後で表情が変わる)。
+
+    位置で条件を分けるので 1 小節周期。2 小節周期の altbar とは別物。
+    """
+    if pos < msteps // 2:
+        return step % grid == 0
+    return (step + max(1, grid // 2)) % grid == 0
+
+
 _BASS_VARIATIONS = (_bv_straight, _bv_synco, _bv_dotted, _bv_grace,
-                    _bv_altbar, _bv_accentup)
+                    _bv_altbar, _bv_accentup, _bv_anticipate, _bv_halfshift)
 
 # レジスター (音域): 0 = 低音のまま / 1 = 1 オクターブ上げて中音域で弾ませる。
 # 音高が必ず変わるので、同じ打点でも確実に別のパターンになる。
@@ -344,6 +473,9 @@ def _compose_bass(notes, emit, rng, beats, scale_id, steps, chord_of, style=0):
     grid = _bass_grid(rhythm_i, msteps)
     onset = _BASS_VARIATIONS[variation_i]
     register = _BASS_REGISTERS[register_i]
+    # index は曲の頭からの通し番号。和音の変わり目で 0 へ戻せば必ず根音から入るが、
+    # **刻みが和音と同じ幅のとき 1 和音 1 打になり、8 種の動きが全部同じ形へ潰れる**
+    # (実測で試して却下)。根音以外から入るのは転回形として自然なので、通しのままにする。
     index = 0
     for step in range(steps):
         pos = step % msteps
@@ -367,7 +499,9 @@ def _compose_bass(notes, emit, rng, beats, scale_id, steps, chord_of, style=0):
                 dur = 2
             while pitch < PITCH_MIN:
                 pitch += 12
-            emit(pitch, step, WAVE_TRIANGLE, dur)
+            # 土台なので落としすぎない (下限は SOFT_WEAK)
+            emit(pitch, step, WAVE_TRIANGLE, dur,
+                 _metric_soft(step, msteps, SOFT_WEAK))
 
 
 # ---- 伴奏 (ノコギリ波) -------------------------------------------------------
@@ -426,21 +560,94 @@ def _sp_pad(step, pos, msteps):
 
 _BACKING_PLACEMENTS = (_sp_beat, _sp_offbeat, _sp_eighth, _sp_pad)
 
+
+# 変化 — 置き方が等間隔グリッドしか作れないので、この軸でリズムを崩す。
+# 置き方 4 種だけだと伴奏の**リズムの形が 4 通り**しかなく、別シードでも
+# 4 回に 1 回は同じ刻みになってしまう (ベースの「変化 6 種」と同じ役割の軸)。
+#
+# 変化は**小節ぶんの発音位置の列を受け取って作り直す**。
+#   ・位置を決め打ちで足す/抜くと、その位置を元から叩く型では何も起きない
+#     (「追い込み」を 8 分刻みに当てたら完全な無操作だった)。
+#   ・さらに悪いことに、決め打ちだと**別の置き方が同じ形へ潰れる**
+#     (拍頭型とパッド型に同じシンコペを当てたら、どちらも [0,3,8,11] になった)。
+#   打点の「何打目か」を基準に動かせば、置き方の性格を保ったまま崩せる。
+# 返り値: {step: 先取りか}。先取り (アンティシペーション) は次の和音を鳴らす。
+
+
+def _bk_straight(bar, start, msteps):
+    """置き方そのまま。"""
+    return {step: False for step in bar}
+
+
+def _bk_synco(bar, start, msteps):
+    """1 打おきに 16 分前へ食い込ませる (シンコペ)。"""
+    return {(step - 1 if nth % 2 and step > start else step): False
+            for nth, step in enumerate(bar)}
+
+
+def _bk_pickup(bar, start, msteps):
+    """小節の最後の打点を小節末の 1 手前へ動かし、次の和音を先取りする。"""
+    out = {step: False for step in bar[:-1]}
+    if bar:
+        out[start + msteps - 2] = True
+    return out
+
+
+def _bk_altbar(bar, start, msteps):
+    """2 小節フレーズ — 2 小節目は前半を休んで後半だけ返す (呼びかけと応答)。"""
+    if (start // msteps) % 2:
+        return {step: False for step in bar if step - start >= msteps // 2}
+    return {step: False for step in bar}
+
+
+def _bk_push(bar, start, msteps):
+    """小節の後半 1/4 を 16 分で刻んで次へ煽る (追い込み)。"""
+    edge = start + _at(msteps, 0.75)
+    out = {step: False for step in bar if step < edge}
+    out.update({step: False for step in range(edge, start + msteps)})
+    return out
+
+
+def _bk_lag(bar, start, msteps):
+    """小節の後半だけ 16 分後ろへずらす (もたれ)。"""
+    half = start + msteps // 2
+    return {(min(step + 1, start + msteps - 1) if step >= half else step): False
+            for step in bar}
+
+
+_BACKING_VARIATIONS = (_bk_straight, _bk_synco, _bk_pickup, _bk_altbar,
+                       _bk_push, _bk_lag)
+
+
+def _backing_hits(placed, vary, steps, msteps):
+    """置き方で発音位置を作り、変化で崩す。{step: 先取りか} を返す。"""
+    hits = {}
+    for start in range(0, steps, msteps):
+        bar = [step for step in range(start, min(start + msteps, steps))
+               if placed(step, step - start, msteps)]
+        for step, pickup in vary(bar, start, msteps).items():
+            if 0 <= step < steps:
+                hits[step] = pickup
+    return hits
+
 # 1 音の長さ。長いものは重なって持続音のように響く。
 _BACKING_DURS = (1, 2, 3, 4, 6)
 
 BACKING_VOICING_COUNT = len(_BACKING_VOICINGS)
 BACKING_PLACEMENT_COUNT = len(_BACKING_PLACEMENTS)
+BACKING_VARIATION_COUNT = len(_BACKING_VARIATIONS)
 BACKING_DUR_COUNT = len(_BACKING_DURS)
-_BACKING_SUB = BACKING_PLACEMENT_COUNT * BACKING_DUR_COUNT
+_BACKING_SUB = (BACKING_PLACEMENT_COUNT * BACKING_VARIATION_COUNT
+                * BACKING_DUR_COUNT)
 
 
 def decode_backing_style(style):
-    """style 番号を (取り方, 置き方, 長さ) へ分解する。"""
+    """style 番号を (取り方, 置き方, 変化, 長さ) へ分解する。"""
     style %= BACKING_VOICING_COUNT * _BACKING_SUB
     voicing, rest = divmod(style, _BACKING_SUB)
-    placement, dur = divmod(rest, BACKING_DUR_COUNT)
-    return voicing, placement, dur
+    placement, rest = divmod(rest, BACKING_VARIATION_COUNT * BACKING_DUR_COUNT)
+    variation, dur = divmod(rest, BACKING_DUR_COUNT)
+    return voicing, placement, variation, dur
 
 
 def backing_styles_with_voicing(voicings):
@@ -452,29 +659,41 @@ def backing_styles_with_voicing(voicings):
 
 def _compose_backing(notes, emit, rng, scale_id, steps, chord_of, style=0,
                      beats=4):
-    """サブ (ノコギリ波): 取り方×置き方×長さで和音を添える。"""
+    """サブ (ノコギリ波): 取り方×置き方×変化×長さで和音を添える。"""
     msteps = beats * 4
     heavy = scale_id == "battle"
     thin = scale_id == "japanese"     # 和風は間を活かして薄く
-    voicing_i, placement_i, dur_i = decode_backing_style(style)
+    voicing_i, placement_i, variation_i, dur_i = decode_backing_style(style)
     voicing = _BACKING_VOICINGS[voicing_i]
     placed = _BACKING_PLACEMENTS[placement_i]
+    vary = _BACKING_VARIATIONS[variation_i]
     hold = _BACKING_DURS[dur_i]
+    hits = _backing_hits(placed, vary, steps, msteps)
     index = 0
     for step in range(steps):
-        pos = step % msteps
-        hit = placed(step, pos, msteps)
-        if thin and hit and step % 4 != 2 and not rng.chance(0.45):
-            hit = False               # 和風は間引いて隙間を作る
+        pickup = hits.get(step)
+        hit = pickup is not None
+        if thin and hit and step % 4 != 2:
+            # 和風は間引いて隙間を作る。ただし BACKING_MIN_NOTES 音は必ず残す。
+            # 全部抜けると伴奏パートが消え、1〜2 音だと和音として聞こえない
+            # (パッド + 先取りの組み合わせで 32 ステップ中 1 音まで減っていた)。
+            spare = rng.chance(0.45)  # 乱数の消費数を一定にするため必ず引く
+            if not spare and index >= BACKING_MIN_NOTES:
+                hit = False
         if heavy and not hit and step % 2 == 1 and rng.chance(0.5):
             hit = True                # 激しい曲は裏を刺して厚くする
+            pickup = False
         if not hit:
             continue
-        pitch = voicing(chord_of(step), index)
+        # 先取りは次の和音を鳴らす (鳴る位置は小節末なので 2step 先を見る)
+        chord = chord_of(min(step + 2, steps - 1)) if pickup else chord_of(step)
+        pitch = voicing(chord, index)
         index += 1
         while pitch < PITCH_MIN:
             pitch += 12
-        emit(pitch, step, WAVE_SAW, hold)
+        # 4 パートで最も小さいので、弱くするのは 1 段まで
+        emit(pitch, step, WAVE_SAW, hold,
+             _metric_soft(step, msteps, SOFT_CORE))
 
 
 def _at(msteps, fraction):
@@ -716,6 +935,7 @@ def _compose_drums(notes, emit, rng, beats, scale_id, steps, style=0):
     for step in range(steps):
         hit = False
         dur = 1
+        soft = SOFT_GHOST          # 埋めた音は弱く (下で芯・アクセントを上書き)
         pos = step % msteps
         if pos == 0:
             nth = 0
@@ -723,21 +943,29 @@ def _compose_drums(notes, emit, rng, beats, scale_id, steps, style=0):
         if jp:
             # 和風の太鼓: 小節頭に長い一打
             if pos == 0:
-                hit, dur = True, 4
+                hit, dur, soft = True, 4, SOFT_ACCENT
             elif pos == msteps - 2:
-                hit = True
+                hit, soft = True, SOFT_CORE
         elif pos == 0:
-            hit, dur = True, 2  # どの型でも小節頭は必ず鳴らす
+            hit, dur, soft = True, 2, SOFT_ACCENT  # どの型でも小節頭は必ず鳴らす
         elif core(step, pos, msteps):
             nth += 1
             hit, dur = True, accent_of(step, pos, msteps, nth)
+            # アクセントは長さだけでなく**強さ**でも張る。長さだけだと
+            # フレーズの音量が平坦になり、拍の階層が耳に伝わらない。
+            soft = SOFT_ACCENT if dur > 1 else SOFT_CORE
         elif fill > 0:
             hit = rng.chance(fill)
 
         if heavy and not hit and step % 2 == 0 and rng.chance(0.5):
             hit = True  # 激しい曲は隙間を埋める
         if hit:
-            emit(DRUM_PITCH, step, WAVE_NOISE, dur)
+            if step >= steps - msteps // 2:
+                # フレーズ最後の半小節は一段強く (次のループへの煽り)。
+                # 拍の階層だけだと 1 小節目と 2 小節目が同じ音量になり、
+                # フレーズ全体としての起伏が出ない。
+                soft = max(SOFT_ACCENT, soft - 1)
+            emit(DRUM_PITCH, step, WAVE_NOISE, dur, soft)
 
 
 def _onset_prob(step, msteps, rhythm):
@@ -822,7 +1050,7 @@ def _melody_onsets(rng, msteps, rhythm, scale_id):
 
 
 def _compose_melody(notes, emit, rng, beats, key, scale_id, steps, chord_of,
-                    custom=None, rhythm=0, motif_mode=0):
+                    custom=None, rhythm=0, motif_mode=0, bass_at=None):
     """メロディ (パルス波): 1小節目でモチーフを作り、2小節目で展開して終止する。
 
     rhythm でリズムの型、motif_mode で 2 小節目の展開の仕方が変わる。
@@ -837,8 +1065,13 @@ def _compose_melody(notes, emit, rng, beats, key, scale_id, steps, chord_of,
         全部がコードトーンだと安全すぎて歌の輪郭が出ない。
     """
     msteps = beats * 4
+    # メロディが使う音域。「主音の 1 オクターブ上から上限まで」だけだと、
+    # 床はキーとともに上がるのに天井 (PITCH_MAX) は動かないので、
+    # **高いキーほど幅が潰れる** (実測で C は 24 半音、B は 13 半音しかなかった)。
+    # 少なくとも MELODY_SPAN 半音は確保する (キー 0 では従来と同じ床になる)。
+    low = min(root_note(key) + 12, PITCH_MAX - MELODY_SPAN)
     melody_notes = [p for p in scale_pitches(key, scale_id, custom=custom)
-                    if p >= root_note(key) + 12]
+                    if p >= low]
     if not melody_notes:
         return
 
@@ -849,6 +1082,7 @@ def _compose_melody(notes, emit, rng, beats, key, scale_id, steps, chord_of,
     motif = {}         # step -> (音のインデックス, 長さ)。休符は登録しない。
     passing = set()    # 経過音を置いた step (2小節目でコードトーンへ寄せ直さない)
     onsets = frozenset(_melody_onsets(rng, msteps, rhythm, scale_id))
+    last_bass = None   # 前の音の時点でのベース音 (反行を取るために覚えておく)
 
     step = 0
     while step < steps:
@@ -856,6 +1090,7 @@ def _compose_melody(notes, emit, rng, beats, key, scale_id, steps, chord_of,
         target = prev_index
         dur = 1
         chord = chord_of(step)
+        bass_now = bass_at(step) if bass_at else None
 
         if step < msteps:
             # 1小節目: 先に決めた発音位置でモチーフを作る
@@ -863,8 +1098,10 @@ def _compose_melody(notes, emit, rng, beats, key, scale_id, steps, chord_of,
                 hit = True
                 rise = step < msteps // 2  # 前半は上へ、後半は下へ (山なり)
                 as_passing = step % 4 != 0 and rng.chance(MELODY_PASSING_PROB)
+                move = 0 if None in (bass_now, last_bass) else bass_now - last_bass
                 target = _pick_melody_note(rng, melody_notes, prev_index, chord,
-                                           step, rise, run, as_passing)
+                                           step, rise, run, as_passing,
+                                           move, bass_now)
                 if rhythm == 2 and rng.chance(0.5):
                     dur = 2  # 引き延ばし型は長い音を好む
                 elif rng.chance(0.3) and step % 2 == 0:
@@ -902,15 +1139,24 @@ def _compose_melody(notes, emit, rng, beats, key, scale_id, steps, chord_of,
             if target == last_index:
                 if run >= MELODY_RUN_LIMIT:
                     # 上限に達した。寄せ直しで同音になった場合もここで解ける。
-                    target = _step_away(melody_notes, target, chord)
-                    run = 1 if target == last_index else 0
+                    moved = _step_away(melody_notes, target, chord)
+                    if moved != target:
+                        target = moved
+                        run = 1        # 逃がした先での 1 音目
+                    else:
+                        run += 1       # 逃げ場が無い (音階に音が 1 つ) だけ
                 else:
                     run += 1
             else:
                 run = 1
             last_index = target
             prev_index = target
-            emit(melody_notes[target], step, WAVE_PULSE, dur)
+            last_bass = bass_now
+            # 主旋律なので下限は SOFT_WEAK。経過音はもう 1 段落として通り道にする。
+            soft = _metric_soft(step, msteps, SOFT_WEAK)
+            if step % msteps in passing:
+                soft = SOFT_WEAK
+            emit(melody_notes[target], step, WAVE_PULSE, dur, soft)
             if dur > 1:
                 step += dur - 1
         step += 1
@@ -923,8 +1169,14 @@ def _develop_motif(motif_entry, mode, center, count):
         # 上行シーケンス: 音階内で 2 度上へ持ち上げる
         return min(count - 1, index + 2), dur
     if mode == 2:
-        # ミラー: 中心の音を軸に上下を反転する
-        return max(0, min(count - 1, 2 * center - index)), dur
+        # ミラー: 中心の音を軸に上下を反転する。
+        # 素の反転は端の音が中心をまたいで大きく飛び (実測 平均 8.9 半音、他の型は
+        # 2.5〜4)、「展開」より別のメロディに聞こえてしまう。元の音からの距離を
+        # MOTIF_MIRROR_SPAN 度以内に抑えて、反転の向きだけを残す (平均 4.8 半音)。
+        mirrored = 2 * center - index
+        mirrored = max(index - MOTIF_MIRROR_SPAN,
+                       min(index + MOTIF_MIRROR_SPAN, mirrored))
+        return max(0, min(count - 1, mirrored)), dur
     if mode == 3:
         # 下行シーケンス: 音階内で 2 度下へ落とす
         return max(0, index - 2), dur
@@ -938,22 +1190,30 @@ def _develop_motif(motif_entry, mode, center, count):
 
 
 def _pick_melody_note(rng, melody_notes, prev_index, chord, step, rise=True,
-                      repeat=0, passing=False):
+                      repeat=0, passing=False, bass_move=0, bass_pitch=None):
     """跳躍ペナルティとコードトーンボーナスで次の音を選ぶ。
 
     rise で旋律の向きを軽く誘導し、山なりの起伏を作る。
     repeat は直前の音が続いている回数。留まるほど高くつくようにして同音連打を抑える
     (跳躍 0 = ペナルティ 0 なので、これが無いと「動かない」が常に最安になる)。
     passing なら経過音として扱い、コードトーン優遇の代わりに順次進行を推す。
+    bass_move / bass_pitch は土台の動きと今の音。ベースと同じ向きに動くこと
+    (並行) と同じ音名になること (ユニゾン・オクターブ) を減点し、反行を取る。
+    実測で 反行 22% / 連続する並行オクターブ 4.0% だったのを改善するため。
     """
     best = prev_index
     best_score = None
     chord_pcs = (chord.root % 12, chord.third % 12, chord.fifth % 12)
+    bass_pc = None if bass_pitch is None else bass_pitch % 12
     for i, pitch in enumerate(melody_notes):
         jump = abs(i - prev_index)
         penalty = jump * 3 if jump > 4 else jump
         if i == prev_index:
             penalty += MELODY_REPEAT_PENALTY * repeat
+        elif bass_move and (i > prev_index) == (bass_move > 0):
+            penalty += MELODY_PARALLEL_PENALTY   # ベースと同じ向き = 並行
+        if bass_pc is not None and pitch % 12 == bass_pc:
+            penalty += MELODY_UNISON_PENALTY     # 土台と同じ音名 = 声部が薄くなる
 
         bonus = 0
         pc = pitch % 12
@@ -1013,5 +1273,5 @@ def _shift_to_chord(melody_notes, motif_entry, chord):
 
 # 軸の直積から決まるスタイル数 (定義の下でしか数えられないのでここで確定させる)
 BASS_STYLES = BASS_MOTION_COUNT * _BASS_SUB   # 動き × 刻み × 変化 × 音域
-BACKING_STYLES = BACKING_VOICING_COUNT * _BACKING_SUB  # 取り方 × 置き方 × 長さ
+BACKING_STYLES = BACKING_VOICING_COUNT * _BACKING_SUB  # 取り方×置き方×変化×長さ
 DRUM_STYLES = DRUM_SKELETON_COUNT * DRUM_DENSITY_COUNT * DRUM_ACCENT_COUNT
