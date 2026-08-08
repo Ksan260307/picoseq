@@ -30,6 +30,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      # Pages をこのワークフローから有効化する。無効なまま deploy すると
+      # 「Failed to create deployment (status: 404)」で最後だけ落ちる。
+      # enablement: true があれば初回もここで有効化されるので、
+      # 画面での初期設定 (Settings > Pages) は要らない。
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

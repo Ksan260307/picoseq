@@ -166,7 +166,9 @@ zip はファイル順と日時を固定して書くため、中身が同じな�
 
 公開は `.github/workflows/pages.yml`（`main` への push、または手動実行）が担当します。
 全テストが通ったときだけ両方を組み立てて GitHub Pages へデプロイします。
-リポジトリ側は Settings → Pages → Source を **GitHub Actions** にする初回設定が必要です。
+Pages の有効化もワークフロー側で行う（`configure-pages` の `enablement`）ので、
+画面での初期設定は要りません。ただし **Pages が使えるリポジトリであること**が前提です
+（公開リポジトリ、または Pages を使える有料プランの非公開リポジトリ）。
 
 ### スマホ (Android) 向けビルド
 

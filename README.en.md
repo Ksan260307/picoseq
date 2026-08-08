@@ -169,7 +169,9 @@ byte-identical output.
 
 Publishing is handled by `.github/workflows/pages.yml` (push to `main`, or manual
 dispatch): it builds both targets and deploys to GitHub Pages only when the whole test
-suite passes. One-time repository setup: Settings → Pages → Source → **GitHub Actions**.
+suite passes. The workflow also turns Pages on by itself (`configure-pages` with
+`enablement`), so no manual setup is needed — but the repository must be allowed to use
+Pages at all (public, or private on a plan that includes Pages).
 
 ### Building for phones (Android)
 

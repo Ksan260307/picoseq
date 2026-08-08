@@ -75,10 +75,27 @@ class PagesWorkflowTest(unittest.TestCase):
         self.assertLess(check, upload)
 
     def test_it_uploads_and_deploys_with_the_official_actions(self):
-        for action in ("actions/checkout@v4", "actions/setup-python@v5",
+        for action in ("actions/checkout@v4", "actions/configure-pages@v5",
+                       "actions/setup-python@v5",
                        "actions/upload-pages-artifact@v3",
                        "actions/deploy-pages@v4"):
             self.assertIn(action, self.body, action)
+
+    def test_it_turns_pages_on_by_itself(self):
+        """Pages が無効なリポジトリでも自力で有効化すること。
+
+        これが無いと、初回だけ画面 (Settings > Pages) を触らないと
+        「Failed to create deployment (status: 404)」で最後だけ落ちる。
+        フォークやクローンでも同じ罠を踏むので、ワークフロー側で面倒を見る。
+        """
+        self.assertRegex(
+            self.body,
+            r"actions/configure-pages@v5\s*\n\s*with:\s*\n\s*enablement: true")
+
+    def test_pages_is_configured_before_the_artifact_is_uploaded(self):
+        configure = self.body.index("configure-pages@v5")
+        upload = self.body.index("upload-pages-artifact")
+        self.assertLess(configure, upload)
 
     def test_the_uploaded_folder_is_the_demo_folder(self):
         self.assertRegex(self.body, r"upload-pages-artifact@v3\s*\n\s*with:\s*\n\s*path: site")
