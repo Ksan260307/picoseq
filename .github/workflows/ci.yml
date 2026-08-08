@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      # numpy / pillow は**入れない**。素の Python だけで全機能が動くことを
+      # ここで担保する (numpy 経路との一致確認は pages.yml 側が numpy 入りで行う)。
       - name: テストを全実行
         run: python -m unittest -v
       - name: 画面の自己診断

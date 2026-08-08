@@ -117,6 +117,19 @@ class WorkflowSetTest(unittest.TestCase):
                      if "deploy-pages" in _text(p)]
         self.assertEqual(deploying, ["pages.yml"])
 
+    def test_the_two_jobs_cover_both_render_paths(self):
+        """numpy 有り (pages) と無し (ci) の両方でテストが回ること。
+
+        numpy 経路と純 Python 経路は**ビット一致が要件**なのに、両方が
+        揃った環境でしか比較できない。片方の環境しか無いと、一致テストが
+        黙ってスキップされたまま気づけなくなる。
+        """
+        pages = _text(PAGES)
+        ci = _text(WORKFLOWS / "ci.yml")
+        self.assertIn("pip install numpy", pages, "pages 側に numpy が要る")
+        self.assertNotIn("pip install numpy", ci,
+                         "ci 側は numpy 無しで純 Python 経路を見る役")
+
     def test_every_workflow_is_valid_utf8_without_a_bom(self):
         for path in sorted(WORKFLOWS.glob("*.yml")):
             head = path.read_bytes()[:3]

@@ -17,6 +17,7 @@ except Exception:       # noqa: BLE001 - ディスプレイが無い環境
     _TK_OK = False
 
 if _TK_OK:
+    from picoseq.ui import flowbar
     from picoseq.ui.flowbar import FlowBar
 
 
@@ -195,18 +196,61 @@ class AppLayoutTest(unittest.TestCase):
                 self.assertLess(got - need, 24, "操作パネルに無駄な余白がある")
 
     def test_toolbar_uses_more_rows_when_narrow(self):
-        """狭いときは行が増える (= 折り返しが実際に働いている)。"""
-        def header_height():
-            self.root.update()
-            self.root.update_idletasks()
-            return self._flowbars()[0].winfo_height()
+        """狭いときは行が増える (= 折り返しが実際に働いている)。
 
+        窓を実際に広げて高さを測る作りにしてはいけない。理由が 2 つある。
+
+        1. `geometry()` は**要求**にすぎず、画面より広い窓は作れない。
+           CI の Windows ランナーは 1024x768 しかなく、1600 を頼んでも
+           1024 程度に丸められる。このツールバーは 1 行に約 1480px 必要なので、
+           「広い側」も折り返してしまい、狭い側と同じ行数になる。
+        2. 高さは行数の代わりにならない。部品は行の中で上下中央に置かれるため、
+           行数が違っても高さが同じ値に落ち着くことがある。
+
+        そこで**幅を直接与えて行分けを聞く**。画面の広さに左右されず、
+        実際のツールバーの中身 (部品の実測幅) で確かめられる。
+
+        基準の幅も決め打ちにしない。フォントの違いで部品の幅は変わるので、
+        「1 行に必要な幅」をツールバー自身から測り、その割合で比べる。
+        """
         self.app.switch_tab("phrase")
-        self.root.geometry("1600x780")
-        wide = header_height()
-        self.root.geometry("820x780")
-        narrow = header_height()
-        self.assertGreater(narrow, wide)
+        self.root.update()
+        self.root.update_idletasks()
+        bar = self._flowbars()[0]
+
+        def rows_at(width):
+            return len(bar._flow(max(1, width - flowbar.EDGE)))
+
+        one_row = (sum(w.winfo_reqwidth() for w, _ in bar._cells)
+                   + flowbar.GAP * (len(bar._cells) - 1)
+                   + flowbar.EDGE)
+        self.assertEqual(rows_at(one_row), 1, "全部ぶんの幅があるのに折り返した")
+        for ratio in (3 / 4, 1 / 2, 1 / 3):
+            width = int(one_row * ratio)
+            with self.subTest(ratio=ratio, width=width):
+                self.assertGreater(rows_at(width), 1,
+                                   f"1 行ぶんの {ratio:.0%} ({width}px) で"
+                                   "折り返していない")
+
+    def test_narrowing_the_window_reaches_the_toolbar(self):
+        """窓を縮めた事実がツールバーまで届く (<Configure> → 並べ直しの配線)。
+
+        行数そのものは上のテストが見る。ここは**幅の変化が反映される**ことだけを
+        見るので、画面の広さに関係なく成り立つ (今より狭くするだけ)。
+        """
+        self.app.switch_tab("phrase")
+        self.root.geometry("1000x780")
+        self.root.update()
+        self.root.update_idletasks()
+        bar = self._flowbars()[0]
+        before = bar._applied
+
+        self.root.geometry("780x780")
+        self.root.update()
+        self.root.update_idletasks()
+        self.assertLess(bar._applied, before,
+                        "窓を縮めても並べ直しに反映されていない")
+        self.assertAlmostEqual(bar._applied, bar.winfo_width(), delta=2)
 
 
 if __name__ == "__main__":

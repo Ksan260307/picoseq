@@ -23,6 +23,9 @@ from picoseq.core.renderer import _render_events_numpy, _render_events_python
 from picoseq.core.schedule import Event, samples_per_tick
 from picoseq.core.synth import voice_samples
 
+# numpy は任意の依存。有無で通せるテストが変わる。
+_HAVE_NUMPY = renderer_mod._np is not None
+
 GOLDEN_PHRASE_CRC = 1819521355  # seed=42, 4/4, C major, 既定パート設定
 GOLDEN_SONG_CRC = 3976110364    # 上記フレーズをパターン0 に保存し ブロック0,1 へ配置
 
@@ -143,8 +146,15 @@ class TestLoopRender(unittest.TestCase):
         self.assertEqual(render_song_loop(p), render_song_loop(p))
 
 
+@unittest.skipUnless(_HAVE_NUMPY, "numpy が無い環境 (純 Python 経路のみ)")
 class TestBackendEquivalence(unittest.TestCase):
-    """numpy 経路と純 Python 経路は完全一致でなければならない (リファレンス実装との比較)。"""
+    """numpy 経路と純 Python 経路は完全一致でなければならない (リファレンス実装との比較)。
+
+    numpy は任意の依存なので、無い環境ではこの比較そのものが成り立たない
+    (`_render_events_numpy` を直接呼ぶため、本体の自動フォールバックは効かない)。
+    CI では numpy 有りのジョブ (pages.yml) がこの一致を確かめ、
+    numpy 無しのジョブ (ci.yml) が純 Python 経路だけを確かめる。
+    """
 
     def _events(self):
         p = _seed42_project()

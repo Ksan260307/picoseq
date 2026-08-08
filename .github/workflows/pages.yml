@@ -34,12 +34,14 @@ jobs:
         with:
           python-version: "3.12"
 
-      # どちらも無くても動くが、有ると音の生成が 5 倍速い / 画像機能のテストも回る
+      # どちらも無くても動くが、有ると音の生成が 5 倍速い / 画像機能のテストも回る。
+      # numpy を入れることで「numpy 経路と純 Python 経路が完全一致するか」の
+      # 比較テストがここで回る (numpy 無しの ci.yml 側では自動スキップになる)。
       - name: 任意の依存を入れる
         run: python -m pip install numpy pillow
 
       # 公開物を作るコードもテスト対象。壊れたページを出さないため先に回す。
-      # 画面 (tkinter) のテストは Tk が無ければ自動でスキップされる。
+      # 画面のテストは $DISPLAY が無いので自動スキップ。UI は ci.yml (Windows) が見る。
       - name: テストを実行
         run: python -m unittest
 
