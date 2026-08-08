@@ -1,0 +1,81 @@
+/* ブラウザ版の見た目。デスクトップ版の配色 (ピコピコ 8bit) に寄せている。 */
+
+:root {
+  color-scheme: light dark;
+  --bg: #f6f7f4; --fg: #23262b; --dim: #5d636e;
+  --panel: #ffffff; --edge: #d8dbd5; --accent: #2f7d4f; --danger: #b4523f;
+  --grid: #eceee8; --line: #dfe2dc; --row: #e4e8de; --root: #d7e2cf;
+  --key-white: #fbfcf9; --key-black: #3a4149; --key-text: #23262b;
+  --btn: #eef0eb;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a; --fg: #e6e9e4; --dim: #9aa2ad;
+    --panel: #1c2024; --edge: #2b3137; --accent: #8fd177; --danger: #e08a8a;
+    --grid: #10130f; --line: #262b25; --row: #171c16; --root: #1d2a1b;
+    --key-white: #cfd6c8; --key-black: #23282c; --key-text: #14171a;
+    --btn: #262c31;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 0 1rem 3rem; background: var(--bg); color: var(--fg);
+  font: 15px/1.6 system-ui, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+main { max-width: 62rem; margin: 0 auto; }
+header { padding: 2rem 0 1rem; }
+h1 { margin: 0 0 .2rem; font-size: 1.7rem; }
+h1 span { color: var(--accent); }
+.lede { margin: 0; color: var(--dim); max-width: 44rem; }
+.meta { color: var(--dim); font-size: .82rem; margin: .4rem 0 0; }
+.label { color: var(--dim); font-size: .82rem; }
+
+.boot { margin: 2rem 0; max-width: 30rem; }
+.bar {
+  height: 6px; background: var(--edge); border-radius: 3px; overflow: hidden;
+  margin: .5rem 0;
+}
+.bar > div { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+
+.panel {
+  background: var(--panel); border: 1px solid var(--edge); border-radius: 6px;
+  padding: .7rem .8rem; margin-bottom: .8rem;
+}
+.row {
+  display: flex; flex-wrap: wrap; gap: .5rem; align-items: center;
+  margin-bottom: .45rem;
+}
+.row:last-child { margin-bottom: 0; }
+label { display: inline-flex; align-items: center; gap: .3rem; font-size: .84rem;
+  color: var(--dim); }
+select, input[type="number"] {
+  background: var(--btn); color: var(--fg); border: 1px solid var(--edge);
+  border-radius: 3px; padding: .2rem .3rem; font: inherit; font-size: .85rem;
+}
+input[type="number"] { width: 6rem; }
+input[type="range"] { width: 8rem; accent-color: var(--accent); }
+output { color: var(--fg); font-variant-numeric: tabular-nums; min-width: 2.4rem; }
+
+button, .filebtn {
+  background: var(--btn); color: var(--fg); border: 1px solid var(--edge);
+  border-radius: 3px; padding: .3rem .7rem; font: inherit; font-size: .85rem;
+  cursor: pointer;
+}
+button:hover, .filebtn:hover { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: default; }
+button.accent { color: var(--accent); font-weight: 600; }
+button.danger { color: var(--danger); }
+.filebtn { position: relative; overflow: hidden; }
+.filebtn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+
+.parts { display: flex; gap: .25rem; }
+.parts button { padding: .25rem .5rem; }
+.parts button[aria-pressed="true"] { border-color: currentColor; font-weight: 600; }
+
+canvas {
+  display: block; width: 100%; height: auto; background: var(--grid);
+  border: 1px solid var(--edge); border-radius: 3px; touch-action: none;
+}
+footer { margin-top: 1.5rem; }
+a { color: var(--accent); }

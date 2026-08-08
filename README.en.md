@@ -135,6 +135,42 @@ You get two builds with identical contents. Both run on PCs without Python insta
 The single-file build unpacks itself into a temp folder on every launch, which is
 where the extra wait comes from. Same features, same sound either way.
 
+### Running in a browser (no install)
+
+<https://ksan260307.github.io/picoseq/> hosts the listening demo, and
+<https://ksan260307.github.io/picoseq/app/> hosts the browser version of the app.
+
+The browser version runs **the very same `picoseq/core`** as the desktop app through
+Pyodide (CPython on WebAssembly). There is no second engine, so the same mood, key and
+seed produce the same song. Only the UI is rebuilt in HTML + Canvas (`web/`).
+
+| | Demo `/` | Browser app `/app/` | Desktop |
+| --- | --- | --- | --- |
+| Listen to prepared songs | yes | yes | yes |
+| Auto-compose / Surprise | – | yes | yes |
+| Place, stretch and accent notes | – | yes | yes |
+| Transpose, reverse, auto-accompany | – | yes | yes |
+| WAV export / JSON save & load | – | yes | yes |
+| Song arrangement, DJ mode, photo scales, MIDI export | – | – | yes |
+| Start-up | instant | ~15 s once (loading Python) | instant |
+
+You can build both locally:
+
+```console
+py tools/build_site.py site       # demo page (renders songs to WAV + piano-roll SVG)
+py tools/build_web.py site/app    # browser app (zips core, copies web/)
+py -m http.server -d site 8000    # open http://localhost:8000/
+```
+
+`build_web.py` refuses to package core if it imports anything a browser cannot run
+(`tkinter`, `ctypes`, `threading`, …), so **a broken page cannot reach production**.
+The zip is written with a fixed file order and timestamp, so identical sources give
+byte-identical output.
+
+Publishing is handled by `.github/workflows/pages.yml` (push to `main`, or manual
+dispatch): it builds both targets and deploys to GitHub Pages only when the whole test
+suite passes. One-time repository setup: Settings → Pages → Source → **GitHub Actions**.
+
 ### Building for phones (Android)
 
 The desktop UI (tkinter) cannot run on phones, so a **lightweight mobile shell**
@@ -329,6 +365,15 @@ picoseq/
 │       ├── storage.py     file locations + app settings (language, zoom, window)
 │       ├── tuning.py      UI tuning values (debounce, Surprise ranges)
 │       └── theme.py       colors and fonts
+├── mobile/                mobile shell (kivy; same core)
+├── web/                   browser UI (core is shared; runs under Pyodide)
+│   ├── bridge.py          entry points called from JavaScript (wraps core; holds state)
+│   ├── index.html         page skeleton
+│   ├── style.css          styling (matches the desktop palette)
+│   └── app.js             Pyodide boot, piano-roll canvas, Web Audio playback
+├── tools/                 scripts that build what gets published
+│   ├── build_site.py      demo page (renders songs to WAV + piano-roll SVG)
+│   └── build_web.py       browser app (checks core, zips it, copies web/)
 └── tests/                 test suite (py -m unittest)
 ```
 

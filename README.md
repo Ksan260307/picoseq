@@ -131,6 +131,43 @@ build_exe.bat
 単一ファイル版は起動のたびに中身を一時フォルダへ展開するため、その分だけ待ちます。
 どちらも同じ機能・同じ音です。
 
+### ブラウザで動かす（インストール不要）
+
+<https://ksan260307.github.io/picoseq/> で試聴デモ、
+<https://ksan260307.github.io/picoseq/app/> でブラウザ版アプリが動きます。
+
+ブラウザ版は Pyodide（WebAssembly 上の CPython）で
+**デスクトップ版と同じ `picoseq/core` をそのまま**動かします。
+エンジンを 2 つ持たないので、同じ曲調・キー・シード値なら出る曲も同じです。
+画面だけ HTML + Canvas で作り直しています（`web/`）。
+
+| | 試聴デモ `/` | ブラウザ版 `/app/` | デスクトップ版 |
+| --- | --- | --- | --- |
+| 用意された曲を聴く | ○ | ○ | ○ |
+| 自動作成・サプライズ | − | ○ | ○ |
+| 音を置く・伸ばす・強さを変える | − | ○ | ○ |
+| 移調・反転・伴奏付け | − | ○ | ○ |
+| WAV 書き出し / JSON 保存・読み込み | − | ○ | ○ |
+| ソング構成・DJ モード・写真から音階・MIDI 書き出し | − | − | ○ |
+| 起動 | すぐ | 初回のみ十数秒（Python の読み込み） | すぐ |
+
+公開物は手元でも作れます:
+
+```console
+py tools/build_site.py site       # 試聴デモ（曲を生成して WAV とピアノロールを書き出す）
+py tools/build_web.py site/app    # ブラウザ版（core を zip に固めて web/ を配置）
+py -m http.server -d site 8000    # http://localhost:8000/ で確認
+```
+
+`build_web.py` は core が `tkinter` / `ctypes` / `threading` などブラウザで
+使えないモジュールを掴んでいないかを検査してから固めます。
+掴んでいたらビルドが失敗するので、**壊れたページが公開されることはありません**。
+zip はファイル順と日時を固定して書くため、中身が同じなら毎回同じバイト列になります。
+
+公開は `.github/workflows/pages.yml`（`main` への push、または手動実行）が担当します。
+全テストが通ったときだけ両方を組み立てて GitHub Pages へデプロイします。
+リポジトリ側は Settings → Pages → Source を **GitHub Actions** にする初回設定が必要です。
+
 ### スマホ (Android) 向けビルド
 
 デスクトップ版の画面 (tkinter) はスマホでは動かないため、同じ作曲エンジンを使う
@@ -321,6 +358,15 @@ picoseq/
 │       ├── storage.py     ファイル置き場・アプリ設定（言語・拡大率・ウィンドウ)
 │       ├── tuning.py      UI の調整値（デバウンス・サプライズの範囲)
 │       └── theme.py       配色・フォント
+├── mobile/                モバイル版 (kivy。同じ core を使う軽量画面)
+├── web/                   ブラウザ版の画面（core は共通。Pyodide で動かす)
+│   ├── bridge.py          JavaScript から呼ぶ入口（core を包むだけ。状態はここ)
+│   ├── index.html         画面の骨組み
+│   ├── style.css          見た目（デスクトップ版の配色に合わせる)
+│   └── app.js             Pyodide の起動・ピアノロール描画・Web Audio 再生
+├── tools/                 公開物を作るスクリプト
+│   ├── build_site.py      試聴デモ（曲を生成し WAV + ピアノロール SVG を書き出す)
+│   └── build_web.py       ブラウザ版（core の検査 → zip 化 → web/ を配置)
 └── tests/                 テスト（py -m unittest で全実行)
 ```
 

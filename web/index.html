@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PicoSeq Web — ブラウザで動く作曲アプリ</title>
+<meta name="description" content="PicoSeq の作曲エンジン (Python) を
+Pyodide でブラウザで動かした版。インストールせずに作曲・編集・試聴ができます。">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <header>
+    <h1><span>PicoSeq</span> Web</h1>
+    <p class="lede">
+      デスクトップ版と<strong>同じ作曲エンジン (Python)</strong> を
+      そのままブラウザで動かしています。作った曲はシード値で再現できます。
+    </p>
+  </header>
+
+  <!-- 起動中の表示。Pyodide (CPython on WASM) の読み込みに数秒かかる -->
+  <div id="boot" class="boot">
+    <p id="boot-text">エンジンを読み込んでいます…</p>
+    <div class="bar"><div id="boot-bar"></div></div>
+    <p class="meta">初回は Python 本体 (約 10MB) を取得します。2 回目以降はキャッシュされます。</p>
+  </div>
+
+  <div id="app" hidden>
+    <section class="panel">
+      <div class="row">
+        <button id="play" class="accent">▶ 再生</button>
+        <label>曲調 <select id="scale"></select></label>
+        <label>キー <select id="key"></select></label>
+        <label>拍子 <select id="beats"></select></label>
+      </div>
+      <div class="row">
+        <label>テンポ <input id="bpm" type="range" min="40" max="240"><output id="bpm-out"></output></label>
+        <label>シード値 <input id="seed" type="number" min="1" max="999999"></label>
+        <button id="auto">✨ 自動作成</button>
+        <button id="surprise">🎲 サプライズ</button>
+        <button id="arrange">🎸 伴奏づけ</button>
+      </div>
+      <div class="row">
+        <span class="label">パート</span>
+        <div id="parts" class="parts"></div>
+        <label>質感 <input id="tone" type="range" min="0" max="100"></label>
+        <label>長さ <input id="gate" type="range" min="10" max="100"></label>
+      </div>
+      <div class="row">
+        <button id="up">🔼</button>
+        <button id="down">🔽</button>
+        <button id="reverse">🔄 反転</button>
+        <button id="clear-part">パート消去</button>
+        <button id="clear" class="danger">全消去</button>
+        <button id="wav">🎧 WAV</button>
+        <button id="save">💾 保存</button>
+        <label class="filebtn">📁 読込<input id="load" type="file" accept=".json"></label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <canvas id="roll" width="900" height="420"></canvas>
+      <p class="meta" id="hint">
+        マス目をクリックで音を置く／もう一度で消す。右へドラッグで伸ばす。
+        Shift+クリックで音の強さを切り替え。
+      </p>
+    </section>
+
+    <footer>
+      <p class="meta" id="status"></p>
+      <p class="meta">
+        ブラウザ版で出来るのは<strong>フレーズ 1 つの作曲・編集・試聴</strong>です。
+        ソング構成・DJ モード・写真からの音階・レイヤーはデスクトップ版のみ。
+      </p>
+      <p class="meta">
+        <a href="../">試聴デモに戻る</a> ／
+        <a href="https://github.com/Ksan260307/picoseq">リポジトリ</a>
+        （Windows 用ビルドは Actions から）
+      </p>
+    </footer>
+  </div>
+</main>
+<script src="app.js" type="module"></script>
+</body>
+</html>

@@ -5,3 +5,5 @@ __pycache__/
 build/
 dist/
 *.spec
+# 公開物。tools/build_site.py と build_web.py がいつでも作り直せる
+site/

@@ -1,0 +1,71 @@
+# GitHub Pages への公開 (CD)。
+#
+# 公開するもの:
+#   /            試聴デモ (エンジンが生成した曲を WAV とピアノロールで並べたページ)
+#   /app/        ブラウザ版アプリ (Pyodide で core をそのまま動かす。作曲・編集・試聴)
+#
+# テストが通ったときだけ公開する。main への push と手動実行が対象。
+# 初回だけリポジトリの Settings > Pages で Source を "GitHub Actions" にする必要がある。
+
+name: Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 公開に必要な最小限の権限だけを渡す
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時に走らせない (後から始まったものを待たせる)
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # どちらも無くても動くが、有ると音の生成が 5 倍速い / 画像機能のテストも回る
+      - name: 任意の依存を入れる
+        run: python -m pip install numpy pillow
+
+      # 公開物を作るコードもテスト対象。壊れたページを出さないため先に回す。
+      # 画面 (tkinter) のテストは Tk が無ければ自動でスキップされる。
+      - name: テストを実行
+        run: python -m unittest
+
+      - name: 試聴デモを生成
+        run: python tools/build_site.py site
+
+      - name: ブラウザ版を組み立て
+        run: python tools/build_web.py site/app
+
+      - name: 出来たものを確認
+        run: |
+          test -f site/index.html
+          test -f site/app/index.html
+          test -f site/app/picoseq-core.zip
+          du -sh site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
