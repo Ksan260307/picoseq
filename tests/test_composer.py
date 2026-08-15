@@ -195,26 +195,35 @@ class TestStyles(unittest.TestCase):
                 results = {compose(4, 0, scale, seed) for seed in range(1, 41)}
                 self.assertGreaterEqual(len(results), 38)
 
-    def test_style_counts_are_reachable(self):
-        """各パートのすべてのスタイルが、どこかのシードで実際に選ばれる。"""
+    def test_small_style_axes_are_fully_reachable(self):
+        """種類の少ない軸は、どこかのシードで全部の値が選ばれる。"""
+        from picoseq.core.composer import MELODY_RHYTHMS, MOTIF_MODES
+        from picoseq.core.prng import Rng
+        for count in (MELODY_RHYTHMS, MOTIF_MODES):
+            seen = set()
+            for seed in range(1, 500):
+                seen.add(Rng(seed).next_int(count))
+            with self.subTest(count=count):
+                self.assertEqual(len(seen), count)
+
+    def test_large_style_axes_are_widely_covered(self):
+        """型の多い軸は、シードを回せば広く行き渡る。
+
+        リズム/ベース/伴奏は 1 千〜1 万種あるので「全部引く」を条件にすると
+        クーポンコレクターで 10 万回以上まわす必要があり、テストとして重すぎる
+        (種類が全部出ることは TestMoodStyleAffinity が別に見ている)。
+        ここでは**偏りが無いこと**を、引いた種類数で確かめる。
+        """
         from picoseq.core.composer import (
-            BACKING_STYLES,
-            BASS_STYLES,
-            DRUM_STYLES,
-            MELODY_RHYTHMS,
-            MOTIF_MODES,
+            BACKING_STYLES, BASS_STYLES, DRUM_STYLES,
         )
         from picoseq.core.prng import Rng
-        seen = [set(), set(), set(), set(), set()]
-        counts = (BASS_STYLES, BACKING_STYLES, DRUM_STYLES, MELODY_RHYTHMS, MOTIF_MODES)
-        # 型が 200 種規模あるので、全部を引くにはシードを多めに回す必要がある
-        # (クーポンコレクター: 208 種なら平均 208*ln208 ≈ 1100 回)
-        for seed in range(1, 12000):
-            rng = Rng(seed)
-            for i, count in enumerate(counts):
-                seen[i].add(rng.next_int(count))
-        for chosen, count in zip(seen, counts):
-            self.assertEqual(len(chosen), count)
+        for count in (BASS_STYLES, BACKING_STYLES, DRUM_STYLES):
+            trials = count * 2
+            seen = {Rng(seed).next_int(count) for seed in range(1, trials)}
+            # 一様なら 1-1/e ≈ 0.63 の割合が少なくとも 1 回は出る
+            with self.subTest(count=count):
+                self.assertGreater(len(seen) / count, 0.55)
 
     def test_style_combinations_expanded(self):
         """リズム・ベース・伴奏が数百種規模、組み合わせは 20 億通り超。"""
@@ -249,17 +258,33 @@ class TestDrumPatterns(unittest.TestCase):
         return out
 
     def test_declared_count_is_the_axis_product(self):
-        """宣言数 = 骨格 × 密度 × アクセント (数え間違いを防ぐ)。"""
+        """宣言数 = 骨格 × 密度 × 2小節目 × アクセント (数え間違いを防ぐ)。"""
         from picoseq.core.composer import (
-            DRUM_ACCENT_COUNT, DRUM_DENSITY_COUNT, DRUM_SKELETON_COUNT,
-            DRUM_STYLES, _DRUM_ACCENTS, _DRUM_FILL, _DRUM_SKELETONS,
+            DRUM_ACCENT_COUNT, DRUM_DENSITY_COUNT, DRUM_FIGURE_COUNT,
+            DRUM_SKELETON_COUNT, DRUM_STYLES, _DRUM_ACCENTS, _DRUM_FILL,
+            _DRUM_SKELETONS, _PHRASE_FIGURES,
         )
         self.assertEqual(DRUM_SKELETON_COUNT, len(_DRUM_SKELETONS))
         self.assertEqual(DRUM_DENSITY_COUNT, len(_DRUM_FILL))
+        self.assertEqual(DRUM_FIGURE_COUNT, len(_PHRASE_FIGURES))
         self.assertEqual(DRUM_ACCENT_COUNT, len(_DRUM_ACCENTS))
         self.assertEqual(
             DRUM_STYLES,
-            DRUM_SKELETON_COUNT * DRUM_DENSITY_COUNT * DRUM_ACCENT_COUNT)
+            DRUM_SKELETON_COUNT * DRUM_DENSITY_COUNT * DRUM_FIGURE_COUNT
+            * DRUM_ACCENT_COUNT)
+
+    def test_rhythm_shapes_clear_two_hundred(self):
+        """**実際に鳴る打点の並び**が 200 通り以上あること。
+
+        型の数 (骨格×密度×2小節目×アクセント) は音の長さの違いも含むので、
+        「たくさんある」の根拠にはならない。アクセントは長さしか変えないから、
+        打点の並びを数えると 1/4 になる。ここが少ないと、別シードでも
+        同じリズムに聞こえる。
+        """
+        from picoseq.core.composer import DRUM_STYLES
+        shapes = {frozenset(step for step, _ in self._hits(style))
+                  for style in range(DRUM_STYLES)}
+        self.assertGreaterEqual(len(shapes), 200)
 
     def test_decode_covers_every_style_once(self):
         """style 番号と (骨格,密度,アクセント) が 1 対 1 に対応する。"""
@@ -270,12 +295,14 @@ class TestDrumPatterns(unittest.TestCase):
     def test_almost_every_pattern_is_distinct(self):
         """ほぼ全部が違う打点列になる (名前だけ増やしていない)。
 
-        最高密度 (隙間をほぼ埋める) だと骨格やアクセントの差が埋もれて
-        数個だけ一致する。それ以外は必ず別の形。
+        完全な重複ゼロにはならない。軸は独立した「つまみ」であって重複を
+        取り除いた一覧表ではないので、別の組み合わせが同じ並びに着地することが
+        ある (最高密度で隙間が埋まると骨格の差が消える、など)。
+        実測 0.92。下回ったら軸の直交性が崩れているので調べること。
         """
         from picoseq.core.composer import DRUM_STYLES
         sigs = {tuple(self._hits(style)) for style in range(DRUM_STYLES)}
-        self.assertGreaterEqual(len(sigs), int(DRUM_STYLES * 0.94),
+        self.assertGreaterEqual(len(sigs), int(DRUM_STYLES * 0.88),
                                 "型の重複が多すぎる (軸が直交していない)")
 
     def test_density_spans_sparse_to_dense(self):
@@ -321,6 +348,87 @@ class TestDrumPatterns(unittest.TestCase):
         self.assertTrue(self._hits(999))
 
 
+class TestPhraseFigures(unittest.TestCase):
+    """2 小節目の扱い — リズム/ベース/伴奏が共有する軸。
+
+    型の数を増やしても 1 小節目と 2 小節目が同じでは「同じ小節の繰り返し」に
+    しか聞こえない。この軸が効いていることを、3 パートまとめて見張る。
+    """
+
+    def _bar_sets(self, hits, msteps):
+        """1 小節目・2 小節目それぞれの小節内位置の集合。"""
+        return (frozenset(s % msteps for s in hits if s < msteps),
+                frozenset(s % msteps for s in hits if s >= msteps))
+
+    def test_every_figure_changes_the_second_bar(self):
+        """「そのまま」以外は必ず 2 小節目を書き換える。
+
+        位置を決め打ちで足し引きする実装だと、その位置を元から叩く型で
+        完全な無操作になる。打点リストを基準にしているので、そうならない。
+        """
+        from picoseq.core.composer import _PHRASE_FIGURES
+        msteps = 16
+        # 疎な型から詰まった型まで。どれでも無操作にならないこと。
+        for bar in ([0, 4, 8, 12], [0, 8], [0, 2, 4, 6, 8, 10, 12, 14],
+                    [0, 3, 6, 9, 12, 15], [0, 3, 4, 8, 11, 12]):
+            for index, figure in enumerate(_PHRASE_FIGURES):
+                shifted = [step + msteps for step in bar]
+                got = figure(shifted, msteps, msteps)
+                with self.subTest(bar=tuple(bar), figure=index):
+                    if index == 0:
+                        self.assertEqual(got, set(shifted))
+                    else:
+                        self.assertNotEqual(got, set(shifted),
+                                            f"figure {index} が無操作")
+
+    def test_figures_stay_inside_the_bar(self):
+        """作り変えても小節からはみ出さない (次の小節を侵食しない)。"""
+        from picoseq.core.composer import _PHRASE_FIGURES
+        for msteps in (8, 12, 16, 20):
+            bar = list(range(msteps, 2 * msteps, max(1, msteps // 4)))
+            for index, figure in enumerate(_PHRASE_FIGURES):
+                got = figure(bar, msteps, msteps)
+                with self.subTest(msteps=msteps, figure=index):
+                    self.assertTrue(all(msteps <= s < 2 * msteps for s in got),
+                                    f"figure {index} が小節の外へ出た")
+
+    def test_each_part_actually_differs_between_the_two_bars(self):
+        """3 パートとも、2 小節が違う型が実際に生成できる。"""
+        from picoseq.core.composer import (
+            BACKING_STYLES, BASS_STYLES, DRUM_STYLES, _compose_backing,
+            _compose_bass, _compose_drums,
+        )
+        from picoseq.core.music import chord_at
+        from picoseq.core.prng import Rng
+        beats, msteps = 4, 16
+        steps = msteps * 2
+        chord_of = lambda s: chord_at(0, "major", s, beats, (0, 3, 1, 4), None)  # noqa: E731
+
+        def runs(count, run):
+            differing = 0
+            for style in range(count):
+                hits = []
+                run(lambda p, s, w, d, sf=0: hits.append(s), style)
+                first, second = self._bar_sets(hits, msteps)
+                if first != second:
+                    differing += 1
+            return differing / count
+
+        cases = (
+            ("リズム", DRUM_STYLES, lambda e, st: _compose_drums(
+                None, e, Rng(42), beats, "major", steps, st)),
+            ("ベース", BASS_STYLES, lambda e, st: _compose_bass(
+                None, e, Rng(42), beats, "major", steps, chord_of, st)),
+            ("伴奏", BACKING_STYLES, lambda e, st: _compose_backing(
+                None, e, Rng(42), "major", steps, chord_of, st, beats)),
+        )
+        for name, count, run in cases:
+            with self.subTest(part=name):
+                # 6 種のうち 1 種は「そのまま」なので、上限はおよそ 5/6
+                self.assertGreater(runs(count, run), 0.5,
+                                   f"{name} の 2 小節目が変わっていない")
+
+
 class TestBassPatterns(unittest.TestCase):
     """ベースのパターン — 200 種規模で、すべて別の形になること。"""
 
@@ -339,29 +447,31 @@ class TestBassPatterns(unittest.TestCase):
 
     def test_declared_count_is_the_axis_product(self):
         from picoseq.core.composer import (
-            BASS_MOTION_COUNT, BASS_REGISTER_COUNT, BASS_RHYTHM_COUNT,
-            BASS_STYLES, BASS_VARIATION_COUNT, _BASS_MOTIONS, _BASS_REGISTERS,
-            _BASS_VARIATIONS,
+            BASS_FIGURE_COUNT, BASS_MOTION_COUNT, BASS_REGISTER_COUNT,
+            BASS_RHYTHM_COUNT, BASS_STYLES, BASS_VARIATION_COUNT,
+            _BASS_MOTIONS, _BASS_REGISTERS, _BASS_VARIATIONS, _PHRASE_FIGURES,
         )
         self.assertEqual(BASS_MOTION_COUNT, len(_BASS_MOTIONS))
         self.assertEqual(BASS_VARIATION_COUNT, len(_BASS_VARIATIONS))
+        self.assertEqual(BASS_FIGURE_COUNT, len(_PHRASE_FIGURES))
         self.assertEqual(BASS_REGISTER_COUNT, len(_BASS_REGISTERS))
         self.assertEqual(
             BASS_STYLES,
             BASS_MOTION_COUNT * BASS_RHYTHM_COUNT * BASS_VARIATION_COUNT
-            * BASS_REGISTER_COUNT)
+            * BASS_FIGURE_COUNT * BASS_REGISTER_COUNT)
 
-    def test_rhythm_shapes_are_not_just_the_subdivisions(self):
-        """**刻みの形**が刻みの数 (3) より十分多いこと。
+    def test_rhythm_shapes_clear_two_hundred(self):
+        """**刻みの形**が 200 通り以上あること。
 
         動き (音程) と音域をいくら増やしても刻みは増えない。刻みの形が少ないと
-        別シードでも同じ土台に聞こえる (変化軸を 6→8 にして 18→24 種)。
+        別シードでも同じ土台に聞こえる。
+        変化 8→18 種と 2 小節目軸 6 種で 24 → 260 通りへ。
         """
-        from picoseq.core.composer import BASS_RHYTHM_COUNT, BASS_STYLES
+        from picoseq.core.composer import BASS_STYLES
         onset_shapes = {frozenset(step for _, step, _ in self._notes(style))
                         for style in range(BASS_STYLES)}
-        self.assertGreaterEqual(len(onset_shapes), BASS_RHYTHM_COUNT * 8,
-                                "ベースの刻みの形が刻みの数から増えていない")
+        self.assertGreaterEqual(len(onset_shapes), 200,
+                                "ベースの刻みの形が 200 通りに届いていない")
 
     def test_no_variation_collapses_to_the_bar_heads(self):
         """どの変化も小節頭だけには潰れない。
@@ -370,15 +480,19 @@ class TestBassPatterns(unittest.TestCase):
         「根音 1 発」になり、別スタイルが同じ音符列になってしまう。
         """
         from picoseq.core.composer import (
-            BASS_REGISTER_COUNT, BASS_RHYTHM_COUNT, BASS_VARIATION_COUNT,
+            BASS_FIGURE_COUNT, BASS_REGISTER_COUNT, BASS_RHYTHM_COUNT,
+            BASS_VARIATION_COUNT,
         )
         for rhythm in range(BASS_RHYTHM_COUNT):
             for variation in range(BASS_VARIATION_COUNT):
-                style = ((rhythm * BASS_VARIATION_COUNT + variation)
-                         * BASS_REGISTER_COUNT)
-                steps = {step for _, step, _ in self._notes(style)}
-                with self.subTest(rhythm=rhythm, variation=variation):
-                    self.assertGreater(len(steps), 2, "小節頭だけに潰れている")
+                for figure in range(BASS_FIGURE_COUNT):
+                    style = (((rhythm * BASS_VARIATION_COUNT + variation)
+                              * BASS_FIGURE_COUNT + figure)
+                             * BASS_REGISTER_COUNT)
+                    steps = {step for _, step, _ in self._notes(style)}
+                    with self.subTest(rhythm=rhythm, variation=variation,
+                                      figure=figure):
+                        self.assertGreater(len(steps), 2, "小節頭だけに潰れている")
 
     def test_subdivisions_divide_the_bar_evenly(self):
         """刻みは小節を割り切る (拍から浮くポリリズムを土台に使わない)。"""
@@ -399,8 +513,8 @@ class TestBassPatterns(unittest.TestCase):
         from picoseq.core.composer import BASS_STYLES, decode_bass_style
         checked = 0
         for style in range(0, BASS_STYLES, 2):
-            self.assertEqual(decode_bass_style(style)[3], 0)
-            self.assertEqual(decode_bass_style(style + 1)[3], 1)
+            self.assertEqual(decode_bass_style(style)[-1], 0)
+            self.assertEqual(decode_bass_style(style + 1)[-1], 1)
             low = self._notes(style)
             high = self._notes(style + 1)
             with self.subTest(style=style):
@@ -418,15 +532,18 @@ class TestBassPatterns(unittest.TestCase):
         seen = {decode_bass_style(s) for s in range(BASS_STYLES)}
         self.assertEqual(len(seen), BASS_STYLES)
 
-    def test_every_pattern_is_distinct(self):
-        """全 192 種が互いに違う (刻みを 2 の冪だけにしないのが効いている)。"""
+    def test_almost_every_pattern_is_distinct(self):
+        """ほとんどの型が互いに違う音符列になる。
+
+        完全な重複ゼロは目指さない。軸は独立した「つまみ」であって重複を
+        取り除いた一覧表ではないので、別の (刻み, 変化, 2小節目) が同じ打点に
+        着地することがある (細かい刻みでは足す型どうしが 16 分で飽和する)。
+        実測 0.85。下回ったら軸が重なっているので調べること。
+        """
         from picoseq.core.composer import BASS_STYLES
-        sigs = {}
-        for style in range(BASS_STYLES):
-            sig = tuple(self._notes(style))
-            self.assertNotIn(sig, sigs,
-                             f"style {style} が style {sigs.get(sig)} と同じ")
-            sigs[sig] = style
+        sigs = {tuple(self._notes(style)) for style in range(BASS_STYLES)}
+        self.assertGreaterEqual(len(sigs), int(BASS_STYLES * 0.78),
+                                "型の重複が多すぎる (軸が直交していない)")
 
     def test_no_pattern_is_silent(self):
         from picoseq.core.composer import BASS_STYLES
@@ -481,28 +598,30 @@ class TestBackingPatterns(unittest.TestCase):
 
     def test_declared_count_is_the_axis_product(self):
         from picoseq.core.composer import (
-            BACKING_DUR_COUNT, BACKING_PLACEMENT_COUNT, BACKING_STYLES,
-            BACKING_VARIATION_COUNT, BACKING_VOICING_COUNT,
+            BACKING_DUR_COUNT, BACKING_FIGURE_COUNT, BACKING_PLACEMENT_COUNT,
+            BACKING_STYLES, BACKING_VARIATION_COUNT, BACKING_VOICING_COUNT,
+            _PHRASE_FIGURES,
         )
+        self.assertEqual(BACKING_FIGURE_COUNT, len(_PHRASE_FIGURES))
         self.assertEqual(
             BACKING_STYLES,
             BACKING_VOICING_COUNT * BACKING_PLACEMENT_COUNT
-            * BACKING_VARIATION_COUNT * BACKING_DUR_COUNT)
+            * BACKING_VARIATION_COUNT * BACKING_FIGURE_COUNT
+            * BACKING_DUR_COUNT)
         self.assertGreaterEqual(BACKING_STYLES, 500)   # 旧 12 → 100 → 600 種
 
-    def test_rhythm_shapes_are_not_just_the_placements(self):
-        """**刻みの形**が置き方の数より十分多いこと。
+    def test_rhythm_shapes_clear_two_hundred(self):
+        """**刻みの形**が 200 通り以上あること。
 
         取り方 (音程) や長さをいくら増やしても刻みは増えない。ここが置き方の数
-        (4) のままだと、別シードでも 4 回に 1 回は同じ刻みの伴奏になる。
+        (かつて 4) のままだと、別シードでも 4 回に 1 回は同じ刻みの伴奏になる。
+        置き方 4→7・変化 6→10・2 小節目 6 種で 22 → 330 通りへ。
         """
-        from picoseq.core.composer import (
-            BACKING_PLACEMENT_COUNT, BACKING_STYLES,
-        )
+        from picoseq.core.composer import BACKING_STYLES
         onset_shapes = {frozenset(step for _, step, _ in self._notes(style))
                         for style in range(BACKING_STYLES)}
-        self.assertGreater(len(onset_shapes), BACKING_PLACEMENT_COUNT * 4,
-                           "伴奏の刻みの形が置き方の数から増えていない")
+        self.assertGreaterEqual(len(onset_shapes), 200,
+                                "伴奏の刻みの形が 200 通りに届いていない")
 
     def test_no_variation_is_a_no_op_on_any_placement(self):
         """変化はどの置き方に当てても必ず何かを変える。
@@ -512,13 +631,14 @@ class TestBackingPatterns(unittest.TestCase):
         少なくとも鳴る音 (先取りの和音) は変わっていなければならない。
         """
         from picoseq.core.composer import (
-            BACKING_DUR_COUNT, BACKING_PLACEMENT_COUNT,
+            BACKING_DUR_COUNT, BACKING_FIGURE_COUNT, BACKING_PLACEMENT_COUNT,
             BACKING_VARIATION_COUNT,
         )
 
         def played(placement, variation):
+            # 2 小節目の軸は 0 (そのまま) に固定して、変化だけを見る
             style = ((placement * BACKING_VARIATION_COUNT + variation)
-                     * BACKING_DUR_COUNT)
+                     * BACKING_FIGURE_COUNT * BACKING_DUR_COUNT)
             notes = self._notes(style)
             return frozenset(step for _, step, _ in notes), tuple(notes)
 
@@ -531,14 +651,16 @@ class TestBackingPatterns(unittest.TestCase):
                         onsets != base_onsets or notes != base_notes,
                         f"変化 {variation} が置き方 {placement} で無操作")
 
-    def test_every_pattern_is_distinct(self):
+    def test_almost_every_pattern_is_distinct(self):
+        """ほとんどの型が互いに違う音符列になる (実測 0.87)。
+
+        ベース・リズムと同じ理由で完全な重複ゼロは目指さない。軸は独立した
+        つまみなので、別の (置き方, 変化, 2小節目) が同じ打点に着地しうる。
+        """
         from picoseq.core.composer import BACKING_STYLES
-        sigs = {}
-        for style in range(BACKING_STYLES):
-            sig = tuple(self._notes(style))
-            self.assertNotIn(sig, sigs,
-                             f"style {style} が style {sigs.get(sig)} と同じ")
-            sigs[sig] = style
+        sigs = {tuple(self._notes(style)) for style in range(BACKING_STYLES)}
+        self.assertGreaterEqual(len(sigs), int(BACKING_STYLES * 0.77),
+                                "型の重複が多すぎる (軸が直交していない)")
 
     def test_no_pattern_is_silent(self):
         from picoseq.core.composer import BACKING_STYLES
@@ -1035,19 +1157,31 @@ class TestMelodyQuality(unittest.TestCase):
 class TestMoodStyleAffinity(unittest.TestCase):
     """曲調ごとの得意なリズム/ベース — 性格を出しつつ多様性は殺さない。"""
 
+    # 得意/不得意は**種類** (リズムの骨格・ベースの動き・伴奏の取り方) に
+    # 付いている。型そのものは 1 万種規模あるので、型の番号で数えても
+    # 「寄っているか」は見えない。種類に落として数える。
+    _PARTS = {
+        "drums": ("_pick_drum_style", "decode_drum_style", "DRUM_SKELETON_COUNT"),
+        "bass": ("_pick_bass_style", "decode_bass_style", "BASS_MOTION_COUNT"),
+        "backing": ("_pick_backing_style", "decode_backing_style",
+                    "BACKING_VOICING_COUNT"),
+    }
+
     def _picks(self, scale_id, count_key="drums", trials=300):
+        """種類ごとの当選回数, 得意な種類, 種類の総数 を返す。"""
         from collections import Counter
 
-        from picoseq.core.composer import (
-            BASS_STYLES, DRUM_STYLES, _style_prefs, _weighted_pick,
-        )
+        from picoseq.core import composer
         from picoseq.core.prng import Rng
-        prefs = _style_prefs(scale_id)
-        count = DRUM_STYLES if count_key == "drums" else BASS_STYLES
+        pick_name, decode_name, count_name = self._PARTS[count_key]
+        pick = getattr(composer, pick_name)
+        decode = getattr(composer, decode_name)
+        kind_count = getattr(composer, count_name)
+        prefs = composer._style_prefs(scale_id)
         picks = Counter()
         for seed in range(1, trials + 1):
-            picks[_weighted_pick(Rng(seed), count, prefs[count_key])] += 1
-        return picks, prefs[count_key], count
+            picks[decode(pick(Rng(seed), prefs))[0]] += 1
+        return picks, prefs[count_key], kind_count
 
     def test_every_scale_has_preferences(self):
         """65 曲調すべて、4 パート分の得意な型が割り当たっている。"""
@@ -1062,20 +1196,24 @@ class TestMoodStyleAffinity(unittest.TestCase):
     def test_melody_and_backing_also_follow_the_mood(self):
         """リズム/ベースだけでなく、メロディと伴奏も曲調に寄る。"""
         from picoseq.core.composer import (
-            BACKING_STYLES, MELODY_RHYTHMS, _style_prefs, _weighted_pick,
+            MELODY_RHYTHMS, _style_prefs, _weighted_pick,
         )
         from picoseq.core.prng import Rng
         for sid in ("major", "japanese", "battle"):
             prefs = _style_prefs(sid)
-            for part, count in (("melody", MELODY_RHYTHMS),
-                                ("backing", BACKING_STYLES)):
-                picked = [_weighted_pick(Rng(s), count, prefs[part])
-                          for s in range(1, 501)]
-                share = sum(1 for p in picked if p in prefs[part]) / len(picked)
-                uniform = len(prefs[part]) / count
-                with self.subTest(scale=sid, part=part):
-                    self.assertGreater(share, uniform * 1.4,
-                                       f"{sid} の {part} が曲調に寄っていない")
+            # メロディのリズムだけは型の番号がそのまま種類なので直接選ぶ
+            picked = [_weighted_pick(Rng(s), MELODY_RHYTHMS, prefs["melody"])
+                      for s in range(1, 501)]
+            share = sum(1 for p in picked if p in prefs["melody"]) / len(picked)
+            with self.subTest(scale=sid, part="melody"):
+                self.assertGreater(share,
+                                   len(prefs["melody"]) / MELODY_RHYTHMS * 1.4)
+
+            picks, preferred, kind_count = self._picks(sid, "backing", 500)
+            share = sum(picks[k] for k in preferred) / sum(picks.values())
+            with self.subTest(scale=sid, part="backing"):
+                self.assertGreater(share, len(preferred) / kind_count * 1.4,
+                                   f"{sid} の伴奏が曲調に寄っていない")
 
     def test_preferred_styles_appear_more_often(self):
         """得意な型は明らかに出やすい (曲調の性格が出る)。"""
@@ -1088,16 +1226,35 @@ class TestMoodStyleAffinity(unittest.TestCase):
                 self.assertGreater(share, uniform * 1.5,
                                    f"{sid} で得意型が優遇されていない")
 
-    def test_all_styles_remain_reachable(self):
-        """禁止はしない — どの曲調でも全部の型が出る余地がある。
-
-        型が 200 種規模なので、全部を引くにはシードを多めに回す必要がある。
-        """
+    def test_all_kinds_remain_reachable(self):
+        """禁止はしない — どの曲調でも全部の種類が出る余地がある。"""
         for sid in ("major", "japanese", "battle", "persian"):
-            picks, _, count = self._picks(sid, trials=8000)
-            with self.subTest(scale=sid):
-                self.assertEqual(len(picks), count,
-                                 f"{sid} で出ない型がある (多様性が失われた)")
+            for part in ("drums", "bass", "backing"):
+                picks, _, kind_count = self._picks(sid, part, trials=2000)
+                with self.subTest(scale=sid, part=part):
+                    self.assertEqual(len(picks), kind_count,
+                                     f"{sid} の {part} に出ない種類がある")
+
+    def test_lower_axes_are_not_stuck(self):
+        """種類の中の下位軸 (密度・2小節目・アクセント等) も振れる。
+
+        重み付けを「種類を選んでから下位を選ぶ」形にしたので、下位が
+        固定されてしまう実装ミスがありうる。実際に散らばることを確かめる。
+        """
+        from picoseq.core import composer
+        from picoseq.core.prng import Rng
+        for part, sub_name in (("drums", "_DRUM_SUB"), ("bass", "_BASS_SUB"),
+                               ("backing", "_BACKING_SUB")):
+            pick_name, decode_name, _ = self._PARTS[part]
+            pick = getattr(composer, pick_name)
+            decode = getattr(composer, decode_name)
+            sub = getattr(composer, sub_name)
+            prefs = composer._style_prefs("major")
+            lower = {decode(pick(Rng(seed), prefs))[1:]
+                     for seed in range(1, 3001)}
+            with self.subTest(part=part):
+                self.assertGreater(len(lower), sub * 0.5,
+                                   f"{part} の下位軸が偏っている")
 
     def test_bass_preferences_also_applied(self):
         picks, preferred, count = self._picks("battle", count_key="bass")

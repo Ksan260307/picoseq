@@ -27,29 +27,36 @@ Place notes on a grid to build a song — or start from a photo.
   Japanese scales (in-sen, ryukyu, …) / blues, jazz, whole-tone, diminished / world scales
   (Persian, Arabic, Hungarian, …) and more (plus photo-derived scales)
 - **✨ Auto-compose** — one-click composition. Keep the "seed value" to recreate the exact same tune anytime.
-  Chord progressions (500–4,000 per mood, **~120,000 total**) × **384 bass** × **600 backing** ×
-  **208 drum** × 10 melody-rhythm × 6 development styles (**2,800,000,000+ playing-style combos alone**)
+  Chord progressions (500–4,000 per mood, **~120,000 total**) × **5,184 bass** × **10,500 backing** ×
+  **1,920 drum** × 10 melody-rhythm × 6 development styles
   combine, so every seed sounds different. Progressions are generated from functional harmony
   (tonic / subdominant / dominant) with substitute chords; the one used (e.g. Am→F→C→G) is shown after generating
-- **🥁 208 drums / 384 bass / 600 backing patterns** — not hand-written one by one, but built from the
-  product of musically meaningful axes (the same idea as the chord progressions).
-  - Drums = **13 skeletons** (rock / eighths / triplet / backbeat / half-time / offbeat / clave /
-    bossa nova / amen / gallop / tribal / drum'n'bass / stutter) × **4 densities** (airy ⇄ packed)
-    × **4 accent schemes**
+- **🥁 Drums, bass and backing each play 200+ distinct rhythms** — not hand-written one by one,
+  but built from the product of musically meaningful axes (the same idea as the chord progressions).
+  - Drums = **20 skeletons** (rock / eighths / triplet / backbeat / half-time / offbeat / clave /
+    bossa nova / amen / gallop / tribal / drum'n'bass / stutter / march / samba / rumba /
+    16th funk / house / shuffle / breakbeat) × **4 densities** (airy ⇄ packed)
+    × **6 second-bar figures** × **4 accent schemes**
   - Bass = **8 motions** (pedal / root-fifth / walking / arpeggio / octave / chromatic / run / third)
-    × **3 subdivisions** (half-bar / quarter / eighth) × **8 variations** (straight / syncopated /
-    dotted / grace / two-bar / build-up / anticipation / second-half shift)
-    × **2 registers** (deep foundation / an octave up)
-  - Backing = **5 voicings** (root / third / fifth / arpeggio up & down) × **4 placements**
-    (beats / offbeats / eighths / pad) × **6 variations** (straight / syncopated / anticipation /
-    two-bar / build-up / laid-back) × **5 lengths** (short stabs ⇄ long sustain)
+    × **3 subdivisions** (half-bar / quarter / eighth) × **18 variations** (straight / syncopated /
+    dotted / grace / two-bar / build-up / anticipation / second-half shift / gallop / double-hit /
+    triplet / end fill / shuffle / clave / head roll / denser second half / 3-against-4 / tail roll)
+    × **6 second-bar figures** × **2 registers** (deep foundation / an octave up)
+  - Backing = **5 voicings** (root / third / fifth / arpeggio up & down) × **7 placements**
+    (beats / offbeats / eighths / pad / gallop / clave / dotted) × **10 variations** (straight /
+    syncopated / anticipation / two-bar / build-up / laid-back / double-hit / roll / mirror / rotate)
+    × **6 second-bar figures** × **5 lengths** (short stabs ⇄ long sustain)
+  - The **second-bar figure** axis is shared by all three parts (as-is / thinned / pushed /
+    laid-back / doubled / halves swapped). A phrase is two bars, so without it no number of
+    patterns stops the phrase from sounding like one bar played twice
   - Densities span very sparse to packed, so you can build and drop energy
   - **What the numbers mean**: the pattern count and the number of distinct *rhythms* are two
-    different things. Axes that change pitch or note length (accents, motions, registers, voicings)
-    add patterns but not rhythms, so each part has its own rhythm-shaping axes.
-    Distinct rhythms: **52 drum / 24 bass / 22 backing**. Backing originally had 100 patterns but
-    only the 4 placements as rhythms — one pair of seeds in four shared the exact same comp rhythm
-    (the variation axis took it to 22, dropping that from 25% to 4.6%)
+    different things. Axes that change pitch or note length (accents, motions, registers, voicings,
+    lengths) add patterns but not rhythms. **The rhythms are what matter**, so those are what was
+    pushed past 200: in 4/4 there are **421 drum / 265 bass / 361 backing** distinct rhythms
+    (they used to be 52 / 24 / 22). 3/4 through 7/4 clear 200 on all three parts too.
+    **2/4 is the exception** — a bar is only 8 steps, leaving too few places to put notes, so it
+    reaches 235 / 148 / 58. That is a limit of the meter itself
 - **🎵 Melodies are written to be singable** — quality, not just quantity. Repeats of the same
   pitch are capped (no melody that gets stuck on one note), a minimum note count is guaranteed
   even for the sparsest rhythm types (never a phrase with no melody), and while beat heads stay

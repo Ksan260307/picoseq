@@ -86,6 +86,105 @@ SOFT_WEAK = 2     # 裏拍・経過音
 SOFT_GHOST = 3    # 埋めの音 (ゴーストノート)
 
 
+def _bar_of(step, msteps):
+    """その step が何小節目か (0 始まり)。"""
+    return step // max(1, msteps)
+
+
+def _styles_with_kind(kinds, kind_count, sub):
+    """指定した種類 (骨格/動き/取り方) に属する style 番号すべて。
+
+    style = 種類 * sub + 下位軸 という並びなので、種類 k の型はちょうど
+    range(k*sub, (k+1)*sub)。全 style を decode して選り分ける必要はない。
+    """
+    out = []
+    for kind in sorted(frozenset(kinds)):
+        if 0 <= kind < kind_count:
+            out.extend(range(kind * sub, (kind + 1) * sub))
+    return tuple(out)
+
+
+# ---- 2 小節目の扱い (ベース・伴奏・リズムで共有) -----------------------------
+# フレーズは 2 小節。**1 小節目と 2 小節目が同じだと、型をいくら増やしても
+# 「同じ 1 小節の繰り返し」にしか聞こえない**。ここで 2 小節目だけを作り変える。
+#
+# 各パートの軸 (刻み・置き方・骨格) は 1 小節の形しか決めないので、この軸を
+# 掛けると**リズムの形がそのまま倍々に増える**。52/24/22 種で頭打ちだった
+# 「実際に鳴る形」を 200 種以上へ伸ばしているのは主にこの軸。
+#
+# 位置を決め打ちで足し引きしてはいけない。その位置を元から叩く型では無操作になり、
+# 逆に叩かない型どうしが同じ形へ潰れる (伴奏の変化軸で実際に踏んだ失敗)。
+# **その小節の打点リストを受け取り、打点の「何打目か」を基準に作り変える。**
+#
+# 入力: bar = その小節の打点 (step の昇順リスト), start = 小節の先頭 step
+# 出力: 作り変えた step の集合。小節頭は呼び出し側が必ず足すので、
+#       ここで消えても構わない (逆に、消しすぎて無音にはならない)。
+
+def _pf_same(bar, start, msteps):
+    """そのまま — 2 小節とも同じ形 (これまでの動き)。"""
+    return set(bar)
+
+
+def _pf_thin(bar, start, msteps):
+    """間引く — 2 打に 1 打だけ残して問いかけに応える (呼びかけと応答)。"""
+    return {step for nth, step in enumerate(bar) if nth % 2 == 0}
+
+
+def _pf_push(bar, start, msteps):
+    """煽る — 後半 1/4 を 16 分で埋めて次の小節へ押し出す。"""
+    edge = start + _at(msteps, 0.75)
+    out = {step for step in bar if step < edge}
+    out.update(range(edge, start + msteps))
+    return out
+
+
+def _pf_shift(bar, start, msteps):
+    """もたれ — 打点を 1 ステップ後ろへずらす (小節からは出さない)。"""
+    last = start + msteps - 1
+    return {min(step + 1, last) for step in bar}
+
+
+def _pf_echo(bar, start, msteps):
+    """二度打ち — 1 打おきに 16 分を添えて跳ねさせる。"""
+    out = set(bar)
+    last = start + msteps - 1
+    out.update(min(step + 1, last) for nth, step in enumerate(bar) if nth % 2)
+    return out
+
+
+def _pf_swap(bar, start, msteps):
+    """前後入れ替え — 小節の前半と後半をひっくり返し、1 つ後ろへずらす。
+
+    ちょうど半小節だけ回してはいけない。**等間隔に並ぶ型は半分回すと自分自身に
+    戻る** (四つ打ちも 8 分刻みも完全な無操作になった)。1 つ足した量で回すと、
+    小節の長さと互いに素になるので、そうならない
+    (拍子は必ず 4 の倍数ステップ ⇒ 半分+1 は奇数 ⇒ 共通の約数を持たない)。
+
+    唯一の例外は 16 分がすべて埋まった小節。そこは何を回しても同じで、
+    「全部鳴っている」以上に崩しようがない。
+    """
+    turn = msteps // 2 + 1
+    return {start + (step - start + turn) % msteps for step in bar}
+
+
+# 0 番は「そのまま」。曲調ごとの得意型はこの軸を指定しないので、
+# 0 番が既定として自然に出る。
+_PHRASE_FIGURES = (_pf_same, _pf_thin, _pf_push, _pf_shift, _pf_echo, _pf_swap)
+PHRASE_FIGURE_COUNT = len(_PHRASE_FIGURES)
+
+
+def _apply_figure(hits, figure, start, msteps, steps):
+    """奇数小節 (2 小節目) だけ figure で作り変える。
+
+    偶数小節は触らない。「1 小節目を提示し、2 小節目で崩す」形にすると、
+    どの型でもフレーズとしての起伏が出る。
+    """
+    if _bar_of(start, msteps) % 2 == 0:
+        return set(hits)
+    bar = sorted(hits)
+    return {step for step in figure(bar, start, msteps) if start <= step < steps}
+
+
 def _metric_soft(step, msteps, floor=SOFT_GHOST):
     """拍の位置から弱さの段を決める。小節頭 > 拍頭 > 8分の裏 > 16分。
 
@@ -195,14 +294,13 @@ def _compose_extra_layer(wave, layer, beats, key, scale_id, seed, prog, custom,
                         rng.next_int(MOTIF_MODES))
     elif wave == WAVE_TRIANGLE:
         _compose_bass(None, emit, rng, beats, scale_id, steps, chord_of,
-                      _weighted_pick(rng, BASS_STYLES, prefs["bass"]))
+                      _pick_bass_style(rng, prefs))
     elif wave == WAVE_NOISE:
         _compose_drums(None, emit, rng, beats, scale_id, steps,
-                       _weighted_pick(rng, DRUM_STYLES, prefs["drums"]))
+                       _pick_drum_style(rng, prefs))
     else:  # WAVE_SAW
         _compose_backing(None, emit, rng, scale_id, steps, chord_of,
-                         _weighted_pick(rng, BACKING_STYLES, prefs["backing"]),
-                         beats)
+                         _pick_backing_style(rng, prefs), beats)
     return out
 
 
@@ -255,9 +353,9 @@ def _compose_notes(beats, key, scale_id, seed, progression, custom, with_melody)
     # シード値ごとに演奏スタイルを選ぶ (曲の性格が大きく変わる)。
     # リズムとベースは曲調が得意な型を出やすくする (禁止はしない)。
     prefs = _style_prefs(scale_id, custom)
-    bass_style = _weighted_pick(rng, BASS_STYLES, prefs["bass"])
-    backing_style = _weighted_pick(rng, BACKING_STYLES, prefs["backing"])
-    drum_style = _weighted_pick(rng, DRUM_STYLES, prefs["drums"])
+    bass_style = _pick_bass_style(rng, prefs)
+    backing_style = _pick_backing_style(rng, prefs)
+    drum_style = _pick_drum_style(rng, prefs)
     melody_rhythm = _weighted_pick(rng, MELODY_RHYTHMS, prefs["melody"])
     motif_mode = rng.next_int(MOTIF_MODES)
 
@@ -294,11 +392,14 @@ def _bass_lookup(notes):
 
 
 # ---- ベース (三角波) ---------------------------------------------------------
-# 軸の直積で組む: 動き 8 × 刻み 3 × 変化 8 × 音域 2 = 384 種 (刻みの形は 24 種)
+# 軸の直積で組む: 動き 8 × 刻み 3 × 変化 16 × 2小節目 5 × 音域 2
 # ・動き … 音程の並び (ペダル/歩き/アルペジオ/半音…)。刻みの形は変えない
 # ・刻み … どの細かさで置くか (半小節 / 4分 / 8分)
-# ・変化 … 置く位置のずらし方 (素直/シンコペ/付点/グレース/2小節/追い込み/先取り/後半ずらし)
+# ・変化 … 1 小節の中での置き方 (素直/シンコペ/付点/ハネ/クラーベ…)
+# ・2小節目 … 2 小節目をどう崩すか (共有軸。_PHRASE_FIGURES を参照)
 # ・音域 … 低音のまま / 1 オクターブ上。これも刻みの形は変えない
+# **刻みの形** (実際に鳴る打点の並び) を決めるのは 刻み × 変化 × 2小節目 の 3 軸だけ。
+# 動きと音域をいくら増やしても形は増えないので、数える時はこの 3 軸で数える。
 
 def _bm_pedal(chord, i):
     """ペダル: 根音を保つ。"""
@@ -433,8 +534,85 @@ def _bv_halfshift(step, pos, grid, msteps):
     return (step + max(1, grid // 2)) % grid == 0
 
 
+def _bv_gallop(step, pos, grid, msteps):
+    """ギャロップ: 刻みに拍の 3/4 位置を足して跳ねさせる。"""
+    return step % grid == 0 or step % 4 == 3
+
+
+def _bv_pairs(step, pos, grid, msteps):
+    """二度打ち: 刻みの**直後**に 16 分を添えて 2 打ワンセットにする。
+
+    「刻みを半分の細かさにする」型 (倍速) は作らない。それは刻み軸そのもので、
+    細かい刻みの素直な型と完全に同じ形になる (実測で 10 通りが潰れた)。
+    グレース (直前に添える) とは打点が 1 つずれるので別の形。
+    """
+    return step % grid == 0 or (step - 1) % grid == 0
+
+
+def _bv_triplet(step, pos, grid, msteps):
+    """3 分割: 刻みに拍を 3 つに割る位置を足す (ハネ感)。"""
+    return step % grid == 0 or step % 8 in (3, 5)
+
+
+def _bv_fillend(step, pos, grid, msteps):
+    """小節終わりの詰め: 最後の 2 ステップを 16 分で埋めて次へ渡す。
+
+    accentup (後半 1/4) より狭い範囲なので、同じ刻みでも別の形になる。
+    """
+    return step % grid == 0 or pos >= msteps - 2
+
+
+def _bv_swing(step, pos, grid, msteps):
+    """ハネ: 刻みを 1 つおきに 1 ステップ後ろへ倒す。
+
+    ずらすのは奇数番目の刻みだけ。全部ずらすと刻みが丸ごと平行移動するだけで、
+    シンコペと同じ形に潰れる (細かい刻みで実際に重なった)。
+    """
+    if step % grid == 0:
+        return (step // grid) % 2 == 0
+    if (step - 1) % grid == 0:
+        return ((step - 1) // grid) % 2 == 1
+    return False
+
+
+def _bv_clave(step, pos, grid, msteps):
+    """クラーベ: 刻みにラテンの芯を足す (拍から少しずれた 3 点)。"""
+    return step % grid == 0 or _on(pos, msteps, (0.1875, 0.375, 0.625))
+
+
+def _bv_headroll(step, pos, grid, msteps):
+    """頭で転がす: 小節頭の直後に 16 分を 2 つ添える。"""
+    return step % grid == 0 or pos in (1, 2)
+
+
+def _bv_ramp(step, pos, grid, msteps):
+    """後半だけ細かく: 前半は刻みどおり、後半は刻みを半分に割る。
+
+    halfshift (後半をずらす) と違い、後半を**詰める**ので密度が変わる。
+    """
+    if pos < msteps // 2:
+        return step % grid == 0
+    return step % max(1, grid // 2) == 0
+
+
+def _bv_edge(step, pos, grid, msteps):
+    """3 対 4: 刻みに小節の 1/3・2/3 位置を足す (拍とずれたうねり)。
+
+    足す位置が拍を割り切らないので、どの刻みの素直な形とも一致しない。
+    """
+    return step % grid == 0 or _on(pos, msteps, (1 / 3, 2 / 3))
+
+
+def _bv_tailroll(step, pos, grid, msteps):
+    """後半を転がす: 小節の後半だけ裏 16 分を足して駆け抜ける。"""
+    return step % grid == 0 or (pos >= msteps // 2 and step % 2 == 1)
+
+
 _BASS_VARIATIONS = (_bv_straight, _bv_synco, _bv_dotted, _bv_grace,
-                    _bv_altbar, _bv_accentup, _bv_anticipate, _bv_halfshift)
+                    _bv_altbar, _bv_accentup, _bv_anticipate, _bv_halfshift,
+                    _bv_gallop, _bv_pairs, _bv_triplet, _bv_fillend,
+                    _bv_swing, _bv_clave, _bv_headroll, _bv_ramp,
+                    _bv_edge, _bv_tailroll)
 
 # レジスター (音域): 0 = 低音のまま / 1 = 1 オクターブ上げて中音域で弾ませる。
 # 音高が必ず変わるので、同じ打点でも確実に別のパターンになる。
@@ -445,47 +623,66 @@ BASS_MOTION_COUNT = len(_BASS_MOTIONS)
 BASS_RHYTHM_COUNT = 3
 BASS_VARIATION_COUNT = len(_BASS_VARIATIONS)
 BASS_REGISTER_COUNT = len(_BASS_REGISTERS)
-_BASS_SUB = BASS_RHYTHM_COUNT * BASS_VARIATION_COUNT * BASS_REGISTER_COUNT
+BASS_FIGURE_COUNT = PHRASE_FIGURE_COUNT
+_BASS_SUB = (BASS_RHYTHM_COUNT * BASS_VARIATION_COUNT * BASS_FIGURE_COUNT
+             * BASS_REGISTER_COUNT)
 
 
 def decode_bass_style(style):
-    """style 番号を (動き, 刻み, 変化, 音域) へ分解する。"""
+    """style 番号を (動き, 刻み, 変化, 2小節目, 音域) へ分解する。"""
     style %= BASS_MOTION_COUNT * _BASS_SUB
     motion, rest = divmod(style, _BASS_SUB)
-    rhythm, rest = divmod(rest, BASS_VARIATION_COUNT * BASS_REGISTER_COUNT)
-    variation, register = divmod(rest, BASS_REGISTER_COUNT)
-    return motion, rhythm, variation, register
+    rhythm, rest = divmod(rest, BASS_VARIATION_COUNT * BASS_FIGURE_COUNT
+                          * BASS_REGISTER_COUNT)
+    variation, rest = divmod(rest, BASS_FIGURE_COUNT * BASS_REGISTER_COUNT)
+    figure, register = divmod(rest, BASS_REGISTER_COUNT)
+    return motion, rhythm, variation, figure, register
 
 
 def bass_styles_with_motion(motions):
-    """指定した動きを使う style 番号すべて (曲調ごとの得意型に使う)。"""
-    wanted = frozenset(motions)
-    total = BASS_MOTION_COUNT * _BASS_SUB
-    return tuple(s for s in range(total) if decode_bass_style(s)[0] in wanted)
+    """指定した動きを使う style 番号すべて (曲調ごとの得意型に使う)。
+
+    動きは番号の最上位の桁なので、走査せず範囲で出せる。全 style を
+    decode して選り分けると、型が数千種になったとき起動が目に見えて遅くなる。
+    """
+    return _styles_with_kind(motions, BASS_MOTION_COUNT, _BASS_SUB)
+
+
+def _bass_hits(onset, figure, grid, msteps, steps):
+    """ベースの打点を作る。小節ごとに刻み→変化→2 小節目の順で組む。
+
+    小節頭は figure のあとで必ず足し直す。「もたれ」のように全体を後ろへ
+    ずらす型では頭が消えてしまい、土台が抜けて拍が見えなくなるため。
+    """
+    hits = set()
+    for start in range(0, steps, msteps):
+        bar = {start}
+        bar.update(step for step in range(start + 1, min(start + msteps, steps))
+                   if onset(step, step - start, grid, msteps))
+        hits |= _apply_figure(bar, figure, start, msteps, steps)
+        hits.add(start)
+    return hits
 
 
 def _compose_bass(notes, emit, rng, beats, scale_id, steps, chord_of, style=0):
-    """ベース (三角波): 動き×刻み×変化で弾く。1 オクターブ下で鳴らす。"""
+    """ベース (三角波): 動き×刻み×変化×2小節目で弾く。1 オクターブ下で鳴らす。"""
     msteps = beats * 4
     drive = scale_id == "battle"      # 激しい曲は隙間を詰める
-    motion_i, rhythm_i, variation_i, register_i = decode_bass_style(style)
+    motion_i, rhythm_i, variation_i, figure_i, register_i = \
+        decode_bass_style(style)
     motion = _BASS_MOTIONS[motion_i]
     grid = _bass_grid(rhythm_i, msteps)
     onset = _BASS_VARIATIONS[variation_i]
     register = _BASS_REGISTERS[register_i]
+    hits = _bass_hits(onset, _PHRASE_FIGURES[figure_i], grid, msteps, steps)
     # index は曲の頭からの通し番号。和音の変わり目で 0 へ戻せば必ず根音から入るが、
     # **刻みが和音と同じ幅のとき 1 和音 1 打になり、8 種の動きが全部同じ形へ潰れる**
     # (実測で試して却下)。根音以外から入るのは転回形として自然なので、通しのままにする。
     index = 0
     for step in range(steps):
         pos = step % msteps
-        hit = False
         dur = 1
-
-        if pos == 0:
-            hit = True                # 小節頭は必ず土台を置く
-        else:
-            hit = onset(step, pos, grid, msteps)
+        hit = step in hits        # 小節頭は _bass_hits が必ず含める
 
         if drive and not hit and step % 2 == 0 and rng.chance(0.85):
             hit = True
@@ -505,10 +702,14 @@ def _compose_bass(notes, emit, rng, beats, scale_id, steps, chord_of, style=0):
 
 
 # ---- 伴奏 (ノコギリ波) -------------------------------------------------------
-# ベース・リズムと同じく軸の直積で組む: 和音の取り方 5 × 置き方 4 × 長さ 5 = 100 種
+# ベース・リズムと同じく軸の直積で組む:
+#   取り方 5 × 置き方 6 × 変化 8 × 2小節目 5 × 長さ 5
 # ・取り方 … どの構成音を鳴らすか (根音/3度/5度/上行アルペジオ/下行アルペジオ)
-# ・置き方 … どこに置くか (拍頭/裏/8分/パッド)
+# ・置き方 … どこに置くか (拍頭/裏/8分/パッド/跳ね/クラーベ)
+# ・変化   … 1 小節の中での崩し方 (下の解説を参照)
+# ・2小節目 … 2 小節目をどう崩すか (共有軸。_PHRASE_FIGURES を参照)
 # ・長さ   … 1 音の伸ばし方 (短く刺す ⇄ 長く敷く)
+# **リズムの形**を決めるのは 置き方 × 変化 × 2小節目 の 3 軸だけ。
 
 def _sb_root(chord, i):
     """根音を保つ (素直な支え)。"""
@@ -558,7 +759,30 @@ def _sp_pad(step, pos, msteps):
     return pos in (0, msteps // 2)
 
 
-_BACKING_PLACEMENTS = (_sp_beat, _sp_offbeat, _sp_eighth, _sp_pad)
+def _sp_gallop(step, pos, msteps):
+    """2 拍ひとまとまりで跳ねる (頭・付点・次の拍頭)。
+
+    「毎拍の頭と 3/4」にすると打点が等間隔に並ぶため、シンコペを当てたときに
+    8 分刻みと同じ形へ潰れる (実測で 6 通りが重複した)。2 拍周期にしてずらす。
+    """
+    return step % 8 in (0, 3, 4)
+
+
+def _sp_clave(step, pos, msteps):
+    """クラーベの位置に置く (拍から少しずれたラテンの芯)。"""
+    return _on(pos, msteps, (0.0, 0.1875, 0.375, 0.625, 0.75))
+
+
+def _sp_dotted(step, pos, msteps):
+    """付点 8 分ごとに置く (3 ステップおき)。
+
+    拍を割り切らないので、拍に乗る他の置き方とは必ず別の形になる。
+    """
+    return pos % 3 == 0
+
+
+_BACKING_PLACEMENTS = (_sp_beat, _sp_offbeat, _sp_eighth, _sp_pad,
+                       _sp_gallop, _sp_clave, _sp_dotted)
 
 
 # 変化 — 置き方が等間隔グリッドしか作れないので、この軸でリズムを崩す。
@@ -586,10 +810,14 @@ def _bk_synco(bar, start, msteps):
 
 
 def _bk_pickup(bar, start, msteps):
-    """小節の最後の打点を小節末の 1 手前へ動かし、次の和音を先取りする。"""
+    """小節の最後の打点を小節の末尾へ動かし、次の和音を先取りする。
+
+    動かす先は**最後の 16 分**。1 手前 (msteps-2) だと、8 分刻みや裏打ちの型では
+    そこが元々の最後の打点なので何も起きず、素直な型と同じ形に潰れる。
+    """
     out = {step: False for step in bar[:-1]}
     if bar:
-        out[start + msteps - 2] = True
+        out[start + msteps - 1] = True
     return out
 
 
@@ -615,19 +843,74 @@ def _bk_lag(bar, start, msteps):
             for step in bar}
 
 
+def _bk_double(bar, start, msteps):
+    """二度打ち — 各打点の直後に 16 分を添えて厚くする。"""
+    out = {step: False for step in bar}
+    last = start + msteps - 1
+    out.update({min(step + 1, last): False for step in bar})
+    return out
+
+
+def _bk_roll(bar, start, msteps):
+    """転がし — 最初の 2 打の**あいだ**を 16 分で埋めて頭から転がす。
+
+    埋める場所を末尾にしてはいけない。
+    ・「最後の打点から小節末まで」→ まばらな置き方では追い込み (後半 1/4) と同じ範囲。
+    ・「最後の 2 打のあいだ」→ 跳ねる置き方では最後の 2 打が隣り合っていて無操作。
+    どの置き方でも先頭 2 打は必ず離れているので、頭を埋めれば必ず何かが変わる。
+    """
+    out = {step: False for step in bar}
+    if len(bar) >= 2:
+        out.update({step: False for step in range(bar[0], bar[1])})
+    return out
+
+
+def _bk_mirror(bar, start, msteps):
+    """反転 — 打点を左右に折り返し、さらに 1 ステップ後ろへ置く。
+
+    素直に折り返すだけでは足りない。**等間隔に並ぶ置き方は折り返しても
+    自分自身に戻る** (付点 8 分ごとの型で完全な無操作になった)。
+    1 つずらせば、どの置き方でも必ず別の形になる。
+    """
+    return {start + (msteps - (step - start) + 1) % msteps: False
+            for step in bar}
+
+
+# 回す量。拍を割り切る量 (小節の 1/4 など) にしてはいけない —
+# 拍頭・裏・8 分のように周期が拍と揃った置き方が**そっくり自分自身に戻る**。
+# 付点 8 分ぶん (3 ステップ) は 2 とも 4 とも互いに素なので、そうならない。
+_BACKING_TURN = 3
+
+
+def _bk_rotate(bar, start, msteps):
+    """回転 — 打点をまとめて付点 8 分ぶん後ろへ回す (はみ出しは頭へ戻る)。
+
+    反転と違い打点の間隔の並びまで保つ。**拍子に依らず**必ず別の形になるので、
+    小節が短い拍子 (3/4 など) でも形の数が落ちない。
+    """
+    return {start + (step - start + _BACKING_TURN) % msteps: False
+            for step in bar}
+
+
 _BACKING_VARIATIONS = (_bk_straight, _bk_synco, _bk_pickup, _bk_altbar,
-                       _bk_push, _bk_lag)
+                       _bk_push, _bk_lag, _bk_double, _bk_roll, _bk_mirror,
+                       _bk_rotate)
 
 
-def _backing_hits(placed, vary, steps, msteps):
-    """置き方で発音位置を作り、変化で崩す。{step: 先取りか} を返す。"""
+def _backing_hits(placed, vary, figure, steps, msteps):
+    """置き方で発音位置を作り、変化で崩し、2 小節目を作り変える。
+
+    返り値は {step: 先取りか}。2 小節目の作り変えで増えた打点は先取りにしない
+    (先取りは「次の和音を予告する」意味を持つので、崩しで勝手に増やさない)。
+    """
     hits = {}
     for start in range(0, steps, msteps):
         bar = [step for step in range(start, min(start + msteps, steps))
                if placed(step, step - start, msteps)]
-        for step, pickup in vary(bar, start, msteps).items():
-            if 0 <= step < steps:
-                hits[step] = pickup
+        varied = {step: pickup for step, pickup in vary(bar, start, msteps).items()
+                  if 0 <= step < steps}
+        for step in _apply_figure(varied, figure, start, msteps, steps):
+            hits[step] = varied.get(step, False)
     return hits
 
 # 1 音の長さ。長いものは重なって持続音のように響く。
@@ -636,25 +919,26 @@ _BACKING_DURS = (1, 2, 3, 4, 6)
 BACKING_VOICING_COUNT = len(_BACKING_VOICINGS)
 BACKING_PLACEMENT_COUNT = len(_BACKING_PLACEMENTS)
 BACKING_VARIATION_COUNT = len(_BACKING_VARIATIONS)
+BACKING_FIGURE_COUNT = PHRASE_FIGURE_COUNT
 BACKING_DUR_COUNT = len(_BACKING_DURS)
 _BACKING_SUB = (BACKING_PLACEMENT_COUNT * BACKING_VARIATION_COUNT
-                * BACKING_DUR_COUNT)
+                * BACKING_FIGURE_COUNT * BACKING_DUR_COUNT)
 
 
 def decode_backing_style(style):
-    """style 番号を (取り方, 置き方, 変化, 長さ) へ分解する。"""
+    """style 番号を (取り方, 置き方, 変化, 2小節目, 長さ) へ分解する。"""
     style %= BACKING_VOICING_COUNT * _BACKING_SUB
     voicing, rest = divmod(style, _BACKING_SUB)
-    placement, rest = divmod(rest, BACKING_VARIATION_COUNT * BACKING_DUR_COUNT)
-    variation, dur = divmod(rest, BACKING_DUR_COUNT)
-    return voicing, placement, variation, dur
+    placement, rest = divmod(rest, BACKING_VARIATION_COUNT
+                             * BACKING_FIGURE_COUNT * BACKING_DUR_COUNT)
+    variation, rest = divmod(rest, BACKING_FIGURE_COUNT * BACKING_DUR_COUNT)
+    figure, dur = divmod(rest, BACKING_DUR_COUNT)
+    return voicing, placement, variation, figure, dur
 
 
 def backing_styles_with_voicing(voicings):
     """指定した和音の取り方を使う style 番号すべて (曲調ごとの得意型に使う)。"""
-    wanted = frozenset(voicings)
-    total = BACKING_VOICING_COUNT * _BACKING_SUB
-    return tuple(s for s in range(total) if decode_backing_style(s)[0] in wanted)
+    return _styles_with_kind(voicings, BACKING_VOICING_COUNT, _BACKING_SUB)
 
 
 def _compose_backing(notes, emit, rng, scale_id, steps, chord_of, style=0,
@@ -663,12 +947,13 @@ def _compose_backing(notes, emit, rng, scale_id, steps, chord_of, style=0,
     msteps = beats * 4
     heavy = scale_id == "battle"
     thin = scale_id == "japanese"     # 和風は間を活かして薄く
-    voicing_i, placement_i, variation_i, dur_i = decode_backing_style(style)
+    voicing_i, placement_i, variation_i, figure_i, dur_i = \
+        decode_backing_style(style)
     voicing = _BACKING_VOICINGS[voicing_i]
     placed = _BACKING_PLACEMENTS[placement_i]
     vary = _BACKING_VARIATIONS[variation_i]
     hold = _BACKING_DURS[dur_i]
-    hits = _backing_hits(placed, vary, steps, msteps)
+    hits = _backing_hits(placed, vary, _PHRASE_FIGURES[figure_i], steps, msteps)
     index = 0
     for step in range(steps):
         pickup = hits.get(step)
@@ -707,13 +992,15 @@ def _on(pos, msteps, fractions):
 
 
 # ---- リズム (ノイズ) ---------------------------------------------------------
-# 200 種を手書きすると保守できないので、**音楽的に意味のある 3 軸の直積**で組む
+# 何百種も手書きすると保守できないので、**音楽的に意味のある軸の直積**で組む
 # (コード進行を機能和声のひな型から自動生成しているのと同じ考え方)。
-#   骨格 13 種 × 密度 4 段 × アクセント 4 種 = 208 種
+#   骨格 20 種 × 密度 4 段 × 2小節目 5 種 × アクセント 4 種
 # ・骨格   … 芯の打点がどこに来るか (リズムの正体)
 # ・密度   … 芯の隙間をどれだけ埋めるか (抜け ⇄ 詰め)
+# ・2小節目 … 2 小節目をどう崩すか (共有軸。_PHRASE_FIGURES を参照)
 # ・アクセント … どの打点を長く鳴らすか (ノイズ 1 声なので長さが強弱になる)
 # 軸が直交しているので、どの組み合わせも意味のあるリズムになる。
+# **リズムの形**を決めるのは 骨格 × 密度 × 2小節目 の 3 軸 (アクセントは長さだけ)。
 
 def _sk_beat(step, pos, msteps):
     """拍頭 — 素直な四つ打ちの芯。"""
@@ -780,10 +1067,54 @@ def _sk_stutter(step, pos, msteps):
     return step % 4 in (0, 1)
 
 
+# ここから下は後から足した骨格。**必ず末尾に足す** — 曲調ごとの得意リズムを
+# 骨格の番号で指定しているので、途中に挿すと全曲調の性格が入れ替わってしまう。
+
+def _sk_march(step, pos, msteps):
+    """行進 — 拍頭に加えて 1・3 拍の裏を踏む (歩く足取り)。"""
+    return step % 4 == 0 or step % 8 == 2
+
+
+def _sk_samba(step, pos, msteps):
+    """サンバ — 前に転がりながら裏で跳ねる。"""
+    return _on(pos, msteps, (0.0, 0.125, 0.3125, 0.5, 0.625, 0.8125))
+
+
+def _sk_rumba(step, pos, msteps):
+    """ルンバ・クラーベ (2-3) — ソン・クラーベの裏返し。"""
+    return _on(pos, msteps, (0.0, 0.1875, 0.4375, 0.625, 0.75))
+
+
+def _sk_funk(step, pos, msteps):
+    """16 分ファンク — 拍頭と拍の直前で食う。"""
+    return step % 4 == 0 or step % 8 == 7
+
+
+def _sk_house(step, pos, msteps):
+    """ハウス — 四つ打ちに 2 拍ごとの開きハットを重ねる。
+
+    「拍頭 + 裏 8 分すべて」にすると 8 分刻みと同じ形になるので、
+    開きハットは 2 拍に 1 回だけにする。
+    """
+    return step % 4 == 0 or step % 8 == 6
+
+
+def _sk_shuffle(step, pos, msteps):
+    """シャッフル — 3 連の 1 つ目と 3 つ目 (跳ねる 8 分)。"""
+    return step % 6 in (0, 4)
+
+
+def _sk_breaks(step, pos, msteps):
+    """ブレイクビーツ — 頭を食い、2 拍目裏から転がす。"""
+    return _on(pos, msteps, (0.0, 0.25, 0.4375, 0.5625, 0.875))
+
+
 _DRUM_SKELETONS = (
     _sk_beat, _sk_eighth, _sk_triplet, _sk_backbeat, _sk_halftime,
     _sk_offbeat, _sk_clave, _sk_bossa, _sk_amen, _sk_gallop,
     _sk_tribal, _sk_dnb, _sk_stutter,
+    _sk_march, _sk_samba, _sk_rumba, _sk_funk, _sk_house,
+    _sk_shuffle, _sk_breaks,
 )
 
 # 芯の隙間を埋める確率 (抜け → 詰め)。
@@ -820,22 +1151,23 @@ _DRUM_ACCENTS = (_acc_down, _acc_back, _acc_triple, _acc_end)
 
 DRUM_SKELETON_COUNT = len(_DRUM_SKELETONS)
 DRUM_DENSITY_COUNT = len(_DRUM_FILL)
+DRUM_FIGURE_COUNT = PHRASE_FIGURE_COUNT
 DRUM_ACCENT_COUNT = len(_DRUM_ACCENTS)
+_DRUM_SUB = DRUM_DENSITY_COUNT * DRUM_FIGURE_COUNT * DRUM_ACCENT_COUNT
 
 
 def decode_drum_style(style):
-    """style 番号を (骨格, 密度, アクセント) へ分解する。"""
-    style %= DRUM_SKELETON_COUNT * DRUM_DENSITY_COUNT * DRUM_ACCENT_COUNT
-    skeleton, rest = divmod(style, DRUM_DENSITY_COUNT * DRUM_ACCENT_COUNT)
-    density, accent = divmod(rest, DRUM_ACCENT_COUNT)
-    return skeleton, density, accent
+    """style 番号を (骨格, 密度, 2小節目, アクセント) へ分解する。"""
+    style %= DRUM_SKELETON_COUNT * _DRUM_SUB
+    skeleton, rest = divmod(style, _DRUM_SUB)
+    density, rest = divmod(rest, DRUM_FIGURE_COUNT * DRUM_ACCENT_COUNT)
+    figure, accent = divmod(rest, DRUM_ACCENT_COUNT)
+    return skeleton, density, figure, accent
 
 
 def drum_styles_with_skeleton(skeletons):
     """指定した骨格を使う style 番号すべて (曲調ごとの得意型を作るのに使う)。"""
-    wanted = frozenset(skeletons)
-    total = DRUM_SKELETON_COUNT * DRUM_DENSITY_COUNT * DRUM_ACCENT_COUNT
-    return tuple(s for s in range(total) if decode_drum_style(s)[0] in wanted)
+    return _styles_with_kind(skeletons, DRUM_SKELETON_COUNT, _DRUM_SUB)
 
 
 # 和風 (陰音階) でも自前の骨格を保つもの。他は太鼓の一打に置き換える。
@@ -884,16 +1216,11 @@ _PREFERRED_KINDS = {
                               "backing": (0, 4), "melody": (3, 8, 4)},
 }
 
-# 種別の指定を、実際の style 番号の集合へ展開しておく (毎回計算しない)。
-# メロディのリズムは番号がそのまま型なので、指定をそのまま使う。
+# 指定は**種類の番号のまま**持つ。style 番号の集合へ展開してはいけない —
+# 型が 1 万種規模になった今、展開すると起動時に十数万個の番号を並べることになる。
+# 抽選は _pick_by_kind が種類の番号のまま扱える。
 _PREFERRED = {
-    family: {
-        "drums": drum_styles_with_skeleton(kinds["drums"]),
-        "bass": bass_styles_with_motion(kinds["bass"]),
-        "backing": backing_styles_with_voicing(kinds["backing"]),
-        "melody": tuple(kinds["melody"]),
-    }
-    for family, kinds in _PREFERRED_KINDS.items()
+    family: dict(kinds) for family, kinds in _PREFERRED_KINDS.items()
 }
 
 
@@ -901,33 +1228,81 @@ def _weighted_pick(rng, count, preferred, weight=STYLE_WEIGHT):
     """得意な型を出やすくして 1 つ選ぶ。rng は必ず 1 回だけ消費する。
 
     禁止はしないので、どの型もいつかは出る (バリエーションを殺さない)。
+    型数が小さい軸 (メロディのリズム) 用。型が数千種ある軸は _pick_by_kind へ。
     """
-    pref = frozenset(i for i in preferred if 0 <= i < count)
-    total = count + (weight - 1) * len(pref)
+    return _pick_by_kind(rng, count, 1, preferred, weight)
+
+
+def _pick_by_kind(rng, kind_count, sub, preferred, weight=STYLE_WEIGHT):
+    """種類 (骨格/動き/取り方) に重みを付けて型を 1 つ選ぶ。
+
+    style = 種類 * sub + 下位軸 という並びなので、**種類の数だけ** 走査すれば
+    足りる。型を 1 つずつ数え上げると、型が 1 万種ある伴奏では作曲のたびに
+    1 万回まわることになる (型を増やしたら実測で効いた)。
+
+    抽選券の配り方は型ごとに数えるのと同じ: 得意な種類の型は weight 枚、
+    それ以外は 1 枚。種類の中では下位軸が一様に出る。rng は 1 回だけ消費する。
+    """
+    pref = frozenset(k for k in preferred if 0 <= k < kind_count)
+    total = sub * (kind_count + (weight - 1) * len(pref))
     ticket = rng.next_int(total)
-    for index in range(count):
-        share = weight if index in pref else 1
-        if ticket < share:
-            return index
-        ticket -= share
-    return count - 1
+    for kind in range(kind_count):
+        share = weight if kind in pref else 1
+        span = share * sub
+        if ticket < span:
+            return kind * sub + ticket // share
+        ticket -= span
+    return kind_count * sub - 1
 
 
 _NO_PREFS = {"drums": (), "bass": (), "backing": (), "melody": ()}
 
 
 def _style_prefs(scale_id, custom=None):
-    """その曲調が得意な型 (リズム/ベース/伴奏/メロディ)。未知でも必ず何か返す。"""
+    """その曲調が得意な**種類** (リズムの骨格 / ベースの動き / 伴奏の取り方 /
+    メロディのリズム)。未知の曲調でも必ず何か返す。"""
     family = music_mod.scale_family(scale_id, custom)
     return _PREFERRED.get(family, _NO_PREFS)
 
 
+def _pick_drum_style(rng, prefs):
+    """曲調に合わせてリズムの型を 1 つ選ぶ (骨格に重みを付ける)。"""
+    return _pick_by_kind(rng, DRUM_SKELETON_COUNT, _DRUM_SUB, prefs["drums"])
+
+
+def _pick_bass_style(rng, prefs):
+    """曲調に合わせてベースの型を 1 つ選ぶ (動きに重みを付ける)。"""
+    return _pick_by_kind(rng, BASS_MOTION_COUNT, _BASS_SUB, prefs["bass"])
+
+
+def _pick_backing_style(rng, prefs):
+    """曲調に合わせて伴奏の型を 1 つ選ぶ (和音の取り方に重みを付ける)。"""
+    return _pick_by_kind(rng, BACKING_VOICING_COUNT, _BACKING_SUB,
+                         prefs["backing"])
+
+
+def _drum_core_hits(core, figure, msteps, steps):
+    """芯の打点を作る。骨格で組み、2 小節目だけ figure で作り変える。
+
+    小節頭は含めない。呼び出し側が「どの型でも小節頭は必ず鳴らす」を
+    別扱いにしているので、ここで足すと打数 (nth) が二重になる。
+    """
+    hits = set()
+    for start in range(0, steps, msteps):
+        bar = {step for step in range(start + 1, min(start + msteps, steps))
+               if core(step, step - start, msteps)}
+        hits |= _apply_figure(bar, figure, start, msteps, steps)
+    hits.discard(0)
+    return {step for step in hits if step % msteps != 0}
+
+
 def _compose_drums(notes, emit, rng, beats, scale_id, steps, style=0):
-    """リズム (ノイズ): 骨格×密度×アクセントで叩く。小節頭は必ず芯を置く。"""
+    """リズム (ノイズ): 骨格×密度×2小節目×アクセントで叩く。小節頭は必ず芯を置く。"""
     msteps = beats * 4
     heavy = scale_id == "battle"
-    skeleton, density, accent = decode_drum_style(style)
-    core = _DRUM_SKELETONS[skeleton]
+    skeleton, density, figure, accent = decode_drum_style(style)
+    core_hits = _drum_core_hits(_DRUM_SKELETONS[skeleton],
+                                _PHRASE_FIGURES[figure], msteps, steps)
     fill = _DRUM_FILL[density]
     accent_of = _DRUM_ACCENTS[accent]
     jp = scale_id == "japanese" and skeleton not in _JP_KEEP_SKELETONS
@@ -948,7 +1323,7 @@ def _compose_drums(notes, emit, rng, beats, scale_id, steps, style=0):
                 hit, soft = True, SOFT_CORE
         elif pos == 0:
             hit, dur, soft = True, 2, SOFT_ACCENT  # どの型でも小節頭は必ず鳴らす
-        elif core(step, pos, msteps):
+        elif step in core_hits:
             nth += 1
             hit, dur = True, accent_of(step, pos, msteps, nth)
             # アクセントは長さだけでなく**強さ**でも張る。長さだけだと
@@ -1272,6 +1647,13 @@ def _shift_to_chord(melody_notes, motif_entry, chord):
 
 
 # 軸の直積から決まるスタイル数 (定義の下でしか数えられないのでここで確定させる)
-BASS_STYLES = BASS_MOTION_COUNT * _BASS_SUB   # 動き × 刻み × 変化 × 音域
-BACKING_STYLES = BACKING_VOICING_COUNT * _BACKING_SUB  # 取り方×置き方×変化×長さ
-DRUM_STYLES = DRUM_SKELETON_COUNT * DRUM_DENSITY_COUNT * DRUM_ACCENT_COUNT
+BASS_STYLES = BASS_MOTION_COUNT * _BASS_SUB       # 動き×刻み×変化×2小節目×音域
+BACKING_STYLES = BACKING_VOICING_COUNT * _BACKING_SUB  # 取り方×置き方×変化×2小節目×長さ
+DRUM_STYLES = DRUM_SKELETON_COUNT * _DRUM_SUB     # 骨格×密度×2小節目×アクセント
+
+# 実際に鳴る「リズムの形」の数 = 打点を決める軸だけの積。
+# 型の数 (上) は音程や長さの違いも含むので、**変化の実感はこちらで測る**。
+BASS_SHAPES = BASS_RHYTHM_COUNT * BASS_VARIATION_COUNT * BASS_FIGURE_COUNT
+BACKING_SHAPES = (BACKING_PLACEMENT_COUNT * BACKING_VARIATION_COUNT
+                  * BACKING_FIGURE_COUNT)
+DRUM_SHAPES = DRUM_SKELETON_COUNT * DRUM_DENSITY_COUNT * DRUM_FIGURE_COUNT

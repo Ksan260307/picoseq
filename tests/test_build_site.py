@@ -147,9 +147,24 @@ class SiteBuildTest(unittest.TestCase):
         self.assertEqual(len(chords), len(SAMPLES) + 1)
 
     def test_stats_come_from_the_code(self):
-        from picoseq.core.composer import BASS_STYLES, DRUM_STYLES
-        self.assertIn(f"{DRUM_STYLES} 種", self.html)
-        self.assertIn(f"{BASS_STYLES} 種", self.html)
+        from picoseq.core.composer import (
+            BACKING_STYLES, BASS_STYLES, DRUM_STYLES,
+        )
+        for count in (DRUM_STYLES, BASS_STYLES, BACKING_STYLES):
+            with self.subTest(count=count):
+                self.assertIn(f"{count:,} 種", self.html)
+
+    def test_rhythm_shape_counts_are_measured_not_declared(self):
+        """打点の並びの数は宣言値ではなく、実際に生成して数えた値であること。
+
+        型の数は音程や長さの違いも含むので「たくさんある」の根拠にならない。
+        ここが手書きの数字に戻ると、増やしたつもりで増えていない事故に気づけない。
+        """
+        from tools.build_site import _rhythm_shapes
+        bass, backing, drums = _rhythm_shapes()
+        self.assertIn(f"{drums} / {bass} / {backing} 通り", self.html)
+        for shapes in (bass, backing, drums):
+            self.assertGreaterEqual(shapes, 200)
 
     def test_theme_supports_light_and_dark(self):
         self.assertIn("color-scheme: light dark", self.html)

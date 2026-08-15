@@ -24,12 +24,19 @@ SECTIONS_JA = [
                     "その番号を入力して Enter を押せばいつでも同じ曲を再現できます。"
                     "作成後は使われたコード進行 (例: Am→F→C→G) が画面下に出ます。"),
         ("演奏スタイル", "シード値ごとにパートの演奏型が変わります。"
-                    "リズム 208 種 (骨格 13 × 密度 4 × アクセント 4)、"
-                    "ベース 384 種 (動き 8 × 刻み 3 × 変化 8 × 音域 2)、"
-                    "伴奏 600 種 (取り方 5 × 置き方 4 × 変化 6 × 長さ 5)、"
+                    "リズム 1,920 種 (骨格 20 × 密度 4 × 2小節目 6 × アクセント 4)、"
+                    "ベース 5,184 種 (動き 8 × 刻み 3 × 変化 18 × 2小節目 6 × 音域 2)、"
+                    "伴奏 10,500 種 (取り方 5 × 置き方 7 × 変化 10 × 2小節目 6 × 長さ 5)、"
                     "メロディのリズム 10 種を組み合わせます。"
-                    "音程や長さを変える軸では刻みは増えないので、"
-                    "刻みの形そのものも リズム 52 / ベース 24 / 伴奏 22 通り用意しています。"),
+                    "音程や長さを変える軸では打点は増えないので、"
+                    "実際に鳴る打点の並びを数えるのが本当の目安です。"
+                    "4/4 で リズム 421 / ベース 265 / 伴奏 361 通りあります "
+                    "(2/4 だけは 1 小節が短く、置ける場所が足りないので少なめです)。"),
+        ("2小節目の扱い", "フレーズは 2 小節なので、2 小節目だけを崩す軸を "
+                    "リズム・ベース・伴奏の 3 パート共通で持っています "
+                    "(そのまま / 間引く / 煽る / もたれ / 二度打ち / 前後入れ替え)。"
+                    "これが無いと、型をいくら増やしても"
+                    "「同じ 1 小節の繰り返し」に聞こえてしまいます。"),
         ("メロディの作り", "同じ音が続く回数に上限があり、どんなに疎なリズム型でも最低音数を保証します。"
                         "拍の頭はコードの音を守りつつ、裏拍には経過音を通すので、"
                         "安全すぎない歌になります。ベースの動きも見ていて、"
@@ -131,6 +138,17 @@ SECTIONS_EN = [
         ("Auto", "Each press generates one phrase from a new \"seed\". The number shows in the field above; "
                  "type it and press Enter to reproduce the exact same music anytime. "
                  "After generating, the chord progression used (e.g. Am→F→C→G) appears at the bottom."),
+        ("Playing styles", "Every seed picks a different playing style per part: "
+                           "1,920 drum (20 skeletons × 4 densities × 6 second-bar figures × 4 accents), "
+                           "5,184 bass (8 motions × 3 subdivisions × 18 variations × 6 figures × 2 registers), "
+                           "10,500 backing (5 voicings × 7 placements × 10 variations × 6 figures × 5 lengths) "
+                           "and 10 melody rhythms. Axes that only change pitch or length add no new rhythms, "
+                           "so the honest measure is how many distinct rhythms actually play: in 4/4 that is "
+                           "421 drum / 265 bass / 361 backing (2/4 has fewer, as its bar is too short)."),
+        ("Second-bar figures", "A phrase is two bars, so drums, bass and backing share an axis that reworks "
+                               "only the second bar (as-is / thinned / pushed / laid-back / doubled / "
+                               "halves swapped). Without it, no number of patterns stops a phrase from "
+                               "sounding like one bar played twice."),
         ("How melodies are written", "Repeats of the same pitch are capped and a minimum note count is "
                                     "guaranteed even for the sparsest rhythms. Beat heads stay on chord "
                                     "tones while off-beats let passing tones through, so it never sounds too safe. "

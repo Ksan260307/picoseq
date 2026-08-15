@@ -22,7 +22,12 @@ sys.path.insert(0, str(ROOT))
 
 from picoseq.core import actions                                # noqa: E402
 from picoseq.core.composer import (                             # noqa: E402
-    BACKING_STYLES, BASS_STYLES, DRUM_STYLES, MELODY_RHYTHMS, MOTIF_MODES,
+    BACKING_DUR_COUNT, BACKING_FIGURE_COUNT, BACKING_PLACEMENT_COUNT,
+    BACKING_STYLES, BACKING_VARIATION_COUNT, BACKING_VOICING_COUNT,
+    BASS_FIGURE_COUNT, BASS_MOTION_COUNT, BASS_REGISTER_COUNT,
+    BASS_RHYTHM_COUNT, BASS_STYLES, BASS_VARIATION_COUNT,
+    DRUM_ACCENT_COUNT, DRUM_DENSITY_COUNT, DRUM_FIGURE_COUNT,
+    DRUM_SKELETON_COUNT, DRUM_STYLES, MELODY_RHYTHMS, MOTIF_MODES,
     chosen_progression,
 )
 from picoseq.core.constants import (                            # noqa: E402
@@ -206,19 +211,63 @@ def build(out_dir: Path) -> dict:
     return {"samples": written, "cards": len(cards) + 1, "bytes": len(page)}
 
 
+def _rhythm_shapes(beats=4):
+    """実際に鳴る打点の並びが何通りあるかを**数えて**返す (ベース, 伴奏, リズム)。
+
+    型の数は音程や長さの違いも含むので、変化の実感の目安にはならない。
+    ここだけは宣言値ではなく実測にする (数字が独り歩きしないように)。
+    """
+    from picoseq.core.composer import (                       # noqa: PLC0415
+        _compose_backing, _compose_bass, _compose_drums,
+    )
+    from picoseq.core.music import chord_at                   # noqa: PLC0415
+    from picoseq.core.prng import Rng                         # noqa: PLC0415
+
+    steps = beats * 4 * 2
+    chord_of = lambda s: chord_at(0, "major", s, beats, (0, 3, 1, 4), None)  # noqa: E731
+
+    def shapes(count, run):
+        seen = set()
+        for style in range(count):
+            hits = []
+            run(lambda p, s, w, d, sf=0: hits.append(s), style)
+            seen.add(frozenset(hits))
+        return len(seen)
+
+    return (
+        shapes(BASS_STYLES, lambda emit, st: _compose_bass(
+            None, emit, Rng(42), beats, "major", steps, chord_of, st)),
+        shapes(BACKING_STYLES, lambda emit, st: _compose_backing(
+            None, emit, Rng(42), "major", steps, chord_of, st, beats)),
+        shapes(DRUM_STYLES, lambda emit, st: _compose_drums(
+            None, emit, Rng(42), beats, "major", steps, st)),
+    )
+
+
 def _stats_rows():
     """演奏スタイルの数をコードから読んで表にする (手書きの数字とズレない)。"""
     combos = (BASS_STYLES * BACKING_STYLES * DRUM_STYLES
               * MELODY_RHYTHMS * MOTIF_MODES)
+    shapes = _rhythm_shapes()
     progressions = sum(len(progression_choices(s)) for s in SCALES
                        if s != "photo")
     families = sorted({scale_family(s) for s in SCALES if s != "photo"})
     return [
         ("曲調", f"{len(SCALES) - 1} 種類"),
         ("コード進行", f"約 {progressions // 1000} 千通り (機能和声から自動生成)"),
-        ("リズム", f"{DRUM_STYLES} 種 (骨格 13 × 密度 4 × アクセント 4)"),
-        ("ベース", f"{BASS_STYLES} 種 (動き 8 × 刻み 3 × 変化 8 × 音域 2)"),
-        ("伴奏", f"{BACKING_STYLES} 種 (取り方 5 × 置き方 4 × 変化 6 × 長さ 5)"),
+        ("リズム",
+         f"{DRUM_STYLES:,} 種 (骨格 {DRUM_SKELETON_COUNT} × 密度 {DRUM_DENSITY_COUNT}"
+         f" × 2小節目 {DRUM_FIGURE_COUNT} × アクセント {DRUM_ACCENT_COUNT})"),
+        ("ベース",
+         f"{BASS_STYLES:,} 種 (動き {BASS_MOTION_COUNT} × 刻み {BASS_RHYTHM_COUNT}"
+         f" × 変化 {BASS_VARIATION_COUNT} × 2小節目 {BASS_FIGURE_COUNT}"
+         f" × 音域 {BASS_REGISTER_COUNT})"),
+        ("伴奏",
+         f"{BACKING_STYLES:,} 種 (取り方 {BACKING_VOICING_COUNT}"
+         f" × 置き方 {BACKING_PLACEMENT_COUNT} × 変化 {BACKING_VARIATION_COUNT}"
+         f" × 2小節目 {BACKING_FIGURE_COUNT} × 長さ {BACKING_DUR_COUNT})"),
+        ("実際に鳴る打点の並び", f"{shapes[2]} / {shapes[0]} / {shapes[1]} 通り"
+                        " (リズム / ベース / 伴奏。4/4 で実測)"),
         ("演奏スタイルの組み合わせ", f"{combos:,} 通り"),
         ("曲調の性格グループ", f"{len(families)} グループ"),
     ]
